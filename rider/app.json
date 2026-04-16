@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "Wasel Rider",
+    "slug": "wasel-rider",
+    "version": "1.0.0",
+    "scheme": "wasel-rider",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0A0A0A"
+    },
+    "ios": {
+      "bundleIdentifier": "com.wasel.rider",
+      "supportsTablet": false
+    },
+    "android": {
+      "package": "com.wasel.rider",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0A0A0A"
+      }
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
