@@ -15,17 +15,32 @@
     },
     "ios": {
       "bundleIdentifier": "com.wasel.driver",
-      "supportsTablet": false
+      "supportsTablet": false,
+      "config": {
+        "googleMapsApiKey": "GOOGLE_MAPS_API_KEY_IOS"
+      }
     },
     "android": {
       "package": "com.wasel.driver",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0A0A0A"
+      },
+      "config": {
+        "googleMaps": {
+          "apiKey": "GOOGLE_MAPS_API_KEY_ANDROID"
+        }
       }
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Wasel needs your location to show you nearby trips.",
+          "locationWhenInUsePermission": "Wasel needs your location to show you nearby trips."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
