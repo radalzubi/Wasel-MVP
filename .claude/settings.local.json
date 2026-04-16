@@ -3,7 +3,19 @@
     "allow": [
       "Bash(git init:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx create-expo-app@latest rider --template blank-typescript)",
+      "Bash(npx expo:*)",
+      "Bash(npx create-expo-app@latest driver --template blank-typescript)",
+      "Bash(git remote:*)",
+      "Bash(git branch:*)",
+      "Bash(git push:*)",
+      "Bash(gh auth:*)",
+      "Bash(npm run *)",
+      "Bash(curl -s http://localhost:3001/health)",
+      "Bash(curl -s -X POST http://localhost:3001/api/waitlist -H 'Content-Type: application/json' -d '{\"name\":\"Test User\",\"phone\":\"+96279000000\",\"role\":\"rider\",\"city\":\"Amman\"}')"
     ]
   }
 }
