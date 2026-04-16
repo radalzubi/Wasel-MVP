@@ -1,0 +1,10 @@
+{
+  "name": "wasel-mvp",
+  "private": true,
+  "workspaces": ["backend", "rider", "driver"],
+  "scripts": {
+    "backend": "npm run dev --workspace=backend",
+    "rider": "npm run start --workspace=rider",
+    "driver": "npm run start --workspace=driver"
+  }
+}
