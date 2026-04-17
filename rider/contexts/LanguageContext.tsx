@@ -72,6 +72,7 @@ const translations: Record<string, Record<Language, string>> = {
   enterNamePhone: { en: 'Please enter your name and phone number.', ar: 'يرجى إدخال اسمك ورقم هاتفك.' },
   error: { en: 'Error', ar: 'خطأ' },
   somethingWrong: { en: 'Something went wrong', ar: 'حدث خطأ ما' },
+  otpSendFailed: { en: 'Failed to send OTP. Please try again.', ar: 'فشل إرسال رمز التحقق. يرجى المحاولة مرة أخرى.' },
 
   // Waitlist - Driver
   joinAsDriver: { en: 'Join as a driver', ar: 'انضم كسائق' },

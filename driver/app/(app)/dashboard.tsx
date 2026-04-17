@@ -13,6 +13,8 @@ import { supabase } from '../../lib/supabase';
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 const AMMAN = { latitude: 31.9539, longitude: 35.9106 };
 
+type TripStatus = 'accepted' | 'en_route' | 'arrived' | 'in_progress' | 'completed' | 'cancelled';
+
 interface TripOffer {
   id: string;
   trip_id: string;
@@ -27,9 +29,9 @@ interface TripOffer {
 interface LatLng { latitude: number; longitude: number; }
 
 const TIER_META: Record<number, { label: string; price: number; color: string; text: string }> = {
-  1: { label: 'Silver 🥈', price: 20, color: '#2A2A2A', text: '#AAA' },
-  2: { label: 'Gold 🥇',   price: 35, color: '#F5A623', text: '#000' },
-  3: { label: 'Platinum 💎', price: 50, color: '#8B5CF6', text: '#FFF' },
+  1: { label: 'Silver',    price: 20, color: '#2A2A2A', text: '#AAA' },
+  2: { label: 'Gold',      price: 35, color: '#F5A623', text: '#000' },
+  3: { label: 'Platinum',  price: 50, color: '#8B5CF6', text: '#FFF' },
 };
 
 function getTierBadge(tier: number) {
@@ -45,7 +47,7 @@ export default function DashboardScreen() {
   const [location, setLocation] = useState<LatLng | null>(null);
   const [offer, setOffer] = useState<TripOffer | null>(null);
   const [offerTimer, setOfferTimer] = useState(15);
-  const [currentTrip, setCurrentTrip] = useState<{ id: string; status: string } | null>(null);
+  const [currentTrip, setCurrentTrip] = useState<{ id: string; status: TripStatus } | null>(null);
   const [subscriptionTier, setSubscriptionTier] = useState<number>(1);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -204,17 +206,19 @@ export default function DashboardScreen() {
   }, [offer]);
 
   async function toggleOnline(value: boolean) {
-    setIsOnline(value);
+    const prevOnline = isOnline;
+    setIsOnline(value); // optimistic update
     try {
       const session = await supabase.auth.getSession();
       const token = session.data.session?.access_token;
-      await fetch(`${API_URL}/api/drivers/status`, {
+      const res = await fetch(`${API_URL}/api/drivers/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ is_online: value, is_available: value }),
       });
+      if (!res.ok) setIsOnline(prevOnline); // revert on error response
     } catch {
-      // Non-fatal
+      setIsOnline(prevOnline); // revert on network error
     }
   }
 
@@ -240,20 +244,36 @@ export default function DashboardScreen() {
         throw new Error(body.error || `HTTP ${res.status}`);
       }
 
-      setCurrentTrip({ id: offer.trip_id, status: 'accepted' });
+      setCurrentTrip({ id: offer.trip_id, status: 'accepted' as TripStatus });
       setOffer(null);
     } catch (err: unknown) {
-      Alert.alert('Could not accept trip', err instanceof Error ? err.message : 'Please try again.');
+      // Do not surface raw API error messages to the user.
+      Alert.alert('Could not accept trip', 'Please try again.');
       setOffer(null);
     }
   }
 
-  function handleDecline() {
+  async function handleDecline() {
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
+    const declinedOffer = offer;
     setOffer(null);
+    if (declinedOffer) {
+      try {
+        const session = await supabase.auth.getSession();
+        const token = session.data.session?.access_token;
+        if (token) {
+          await fetch(`${API_URL}/api/trips/${declinedOffer.trip_id}/decline`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+          });
+        }
+      } catch {
+        // Non-fatal: offer is already cleared from UI
+      }
+    }
   }
 
   async function advanceTripStatus(nextStatus: string) {
@@ -278,17 +298,27 @@ export default function DashboardScreen() {
       if (nextStatus === 'completed') {
         setCurrentTrip(null);
       } else {
-        setCurrentTrip({ ...currentTrip, status: nextStatus });
+        setCurrentTrip({ ...currentTrip, status: nextStatus as TripStatus });
       }
     } catch (err: unknown) {
-      Alert.alert('Status update failed', err instanceof Error ? err.message : 'Please try again.');
+      // Do not surface raw API error messages to the user.
+      Alert.alert('Status update failed', 'Please try again.');
     }
   }
 
-  const tripActions: Record<string, { labelKey: string; next: string }> = {
-    accepted: { labelKey: 'iArrived', next: 'arrived' },
-    arrived: { labelKey: 'startTrip', next: 'in_progress' },
-    in_progress: { labelKey: 'completeTrip', next: 'completed' },
+  const tripActions: Record<string, { labelKey: string; next: TripStatus }> = {
+    accepted:    { labelKey: 'startDrive',    next: 'en_route'    },
+    en_route:    { labelKey: 'iArrived',      next: 'arrived'     },
+    arrived:     { labelKey: 'startTrip',     next: 'in_progress' },
+    in_progress: { labelKey: 'completeTrip',  next: 'completed'   },
+  };
+
+  const tripStatusLabel: Record<string, string> = {
+    accepted:    t('driverAccepted'),
+    en_route:    t('drivingToPickup'),
+    arrived:     t('driverArrived'),
+    in_progress: t('tripInProgress'),
+    completed:   t('tripComplete'),
   };
 
   const tierBadge = getTierBadge(subscriptionTier);
@@ -363,7 +393,9 @@ export default function DashboardScreen() {
           </>
         ) : (
           <View>
-            <Text style={styles.tripActiveLabel}>{t('tripActive')}</Text>
+            <Text style={styles.tripActiveLabel}>
+              {tripStatusLabel[currentTrip.status] ?? t('tripActive')}
+            </Text>
             {currentTrip.status && tripActions[currentTrip.status] && (
               <TouchableOpacity
                 style={styles.tripActionButton}

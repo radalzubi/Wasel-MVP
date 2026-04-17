@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase';
-import { requireAuth, AuthRequest } from '../middleware/auth';
+import { requireAuth, requireDriver, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
@@ -11,7 +11,7 @@ const LocationSchema = z.object({
 });
 
 // PATCH /api/drivers/location — update driver GPS
-router.patch('/location', requireAuth, async (req: AuthRequest, res) => {
+router.patch('/location', requireAuth, requireDriver, async (req: AuthRequest, res) => {
   const parsed = LocationSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const { lat, lng } = parsed.data;
@@ -28,7 +28,7 @@ router.patch('/location', requireAuth, async (req: AuthRequest, res) => {
 });
 
 // PATCH /api/drivers/status — toggle online/available
-router.patch('/status', requireAuth, async (req: AuthRequest, res) => {
+router.patch('/status', requireAuth, requireDriver, async (req: AuthRequest, res) => {
   const StatusSchema = z.object({
     is_online: z.boolean().optional(),
     is_available: z.boolean().optional(),
@@ -46,7 +46,7 @@ router.patch('/status', requireAuth, async (req: AuthRequest, res) => {
 });
 
 // GET /api/drivers/me
-router.get('/me', requireAuth, async (req: AuthRequest, res) => {
+router.get('/me', requireAuth, requireDriver, async (req: AuthRequest, res) => {
   const { data, error } = await supabase
     .from('drivers')
     .select('*')

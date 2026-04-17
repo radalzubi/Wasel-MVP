@@ -4,8 +4,9 @@ import {
   ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView,
 } from 'react-native';
 import { router } from 'expo-router';
-import { supabase } from '../../lib/supabase';
 import { useLanguage } from '../../contexts/LanguageContext';
+
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
 export default function LoginScreen() {
   const { t, language, toggleLanguage } = useLanguage();
@@ -23,12 +24,22 @@ export default function LoginScreen() {
     const formatted = cleaned.startsWith('+') ? cleaned : `+962${cleaned.replace(/^0/, '')}`;
 
     setLoading(true);
-    const { error } = await supabase.auth.signInWithOtp({ phone: formatted });
-    setLoading(false);
-
-    if (error) {
-      Alert.alert(t('error'), error.message);
+    try {
+      const res = await fetch(`${API_URL}/api/auth/send-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: formatted }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        Alert.alert(t('error'), data.error || t('otpSendFailed'));
+        return;
+      }
+    } catch {
+      Alert.alert(t('error'), t('otpSendFailed'));
       return;
+    } finally {
+      setLoading(false);
     }
 
     router.push({ pathname: '/(auth)/verify', params: { phone: formatted } });

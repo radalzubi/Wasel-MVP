@@ -12,7 +12,7 @@ router.get('/me', requireAuth, requireRider, async (req: AuthRequest, res) => {
     .eq('id', req.userId!)
     .maybeSingle();
 
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) return res.status(500).json({ error: 'Failed to fetch rider profile' });
   if (!data) return res.status(404).json({ error: 'Rider not found' });
 
   res.json(data);

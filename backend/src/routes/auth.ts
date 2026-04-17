@@ -29,17 +29,23 @@ const VerifySchema = z.object({
 const TEST_PHONES = new Set(['+962790000001', '+962790000002']);
 const TEST_OTP   = '123456';
 
-const DEV_USERS = {
-  rider:  { email: 'test-rider@wasel.dev',  password: 'change-me-dev-password', phone: '+962790000001' },
-  driver: { email: 'test-driver@wasel.dev', password: 'change-me-dev-password', phone: '+962790000002' },
-} as const;
+// SECURITY: The dev test password is read from the DEV_TEST_PASSWORD environment
+// variable. Although the dev-login and OTP bypass routes are gated on NODE_ENV,
+// this variable should still be set to a strong, unique secret in any
+// production-adjacent environment (staging, CI) to prevent accidental exposure.
+const DEV_TEST_PASSWORD = process.env.DEV_TEST_PASSWORD || 'change-me-dev-password';
+
+const DEV_USERS: Record<'rider' | 'driver', { email: string; password: string; phone: string }> = {
+  rider:  { email: 'test-rider@wasel.dev',  password: DEV_TEST_PASSWORD, phone: '+962790000001' },
+  driver: { email: 'test-driver@wasel.dev', password: DEV_TEST_PASSWORD, phone: '+962790000002' },
+};
 
 type DevRole = keyof typeof DEV_USERS;
 
 /** Returns the dev user config for a test phone, or null if not a test phone. */
 function devUserForPhone(phone: string): { role: DevRole; email: string; password: string; phone: string } | null {
-  if (phone === DEV_USERS.rider.phone)  return { role: 'rider',  ...DEV_USERS.rider  };
-  if (phone === DEV_USERS.driver.phone) return { role: 'driver', ...DEV_USERS.driver };
+  if (phone === DEV_USERS.rider.phone)  return { role: 'rider'  as const, ...DEV_USERS.rider  };
+  if (phone === DEV_USERS.driver.phone) return { role: 'driver' as const, ...DEV_USERS.driver };
   return null;
 }
 
@@ -78,6 +84,27 @@ async function applyWaitlistMembership(userId: string, phone: string, table: 'ri
 }
 
 // ----------------------------------------------------------------
+// Per-phone OTP throttle (defence-in-depth on top of the IP-based otpLimiter)
+// Max 3 OTP sends per phone number per 15-minute window.
+// ----------------------------------------------------------------
+
+const PHONE_OTP_MAX        = 3;
+const PHONE_OTP_WINDOW_MS  = 15 * 60 * 1000;
+const phoneOtpMap          = new Map<string, { count: number; resetAt: number }>();
+
+function isPhoneThrottled(phone: string): boolean {
+  const now  = Date.now();
+  const entry = phoneOtpMap.get(phone);
+  if (!entry || entry.resetAt <= now) {
+    phoneOtpMap.set(phone, { count: 1, resetAt: now + PHONE_OTP_WINDOW_MS });
+    return false;
+  }
+  if (entry.count >= PHONE_OTP_MAX) return true;
+  entry.count++;
+  return false;
+}
+
+// ----------------------------------------------------------------
 // POST /api/auth/send-otp
 // ----------------------------------------------------------------
 
@@ -87,9 +114,18 @@ router.post('/send-otp', otpLimiter, async (req, res) => {
 
   const { phone } = parsed.data;
 
-  // Dev bypass: skip real OTP for test phones outside production
-  if (process.env.NODE_ENV !== 'production' && TEST_PHONES.has(phone)) {
+  // Dev bypass: skip real OTP for test phones only in explicitly allowed envs.
+  // Using an allowlist (not a denylist) so the bypass stays inactive when
+  // NODE_ENV is unset or set to an unrecognised value.
+  const isDevEnv = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
+  if (isDevEnv && TEST_PHONES.has(phone)) {
     return res.json({ message: 'OTP sent' });
+  }
+
+  // Per-phone rate limit: blocks SMS-flooding of a specific number even when
+  // the attacker rotates IPs to bypass the IP-based otpLimiter above.
+  if (isPhoneThrottled(phone)) {
+    return res.status(429).json({ error: 'Too many OTP requests for this number. Try again later.' });
   }
 
   const { error } = await supabase.auth.signInWithOtp({ phone });
@@ -109,9 +145,11 @@ router.post('/verify', otpLimiter, async (req, res) => {
   const { phone, token, role } = parsed.data;
 
   // ------------------------------------------------------------------
-  // Dev bypass: test phones + magic OTP skip real Supabase verification
+  // Dev bypass: test phones + magic OTP skip real Supabase verification.
+  // Allowlist only — bypass stays inactive when NODE_ENV is unset.
   // ------------------------------------------------------------------
-  if (process.env.NODE_ENV !== 'production' && TEST_PHONES.has(phone) && token === TEST_OTP) {
+  const isDevEnv = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
+  if (isDevEnv && TEST_PHONES.has(phone) && token === TEST_OTP) {
     const devUser = devUserForPhone(phone)!;
     const creds   = DEV_USERS[devUser.role];
 
@@ -125,7 +163,7 @@ router.post('/verify', otpLimiter, async (req, res) => {
     });
     // Ignore "already exists" errors (code 422 / message contains "already registered")
     if (createErr && !createErr.message.toLowerCase().includes('already')) {
-      return res.status(500).json({ error: createErr.message });
+      return res.status(500).json({ error: 'Failed to initialise dev user' });
     }
 
     const { data, error: signInErr } = await supabase.auth.signInWithPassword({
@@ -133,12 +171,16 @@ router.post('/verify', otpLimiter, async (req, res) => {
       password: creds.password,
     });
     if (signInErr || !data.session) {
-      return res.status(500).json({ error: signInErr?.message || 'Dev sign-in failed' });
+      return res.status(500).json({ error: 'Dev sign-in failed' });
     }
 
     const userId = data.user!.id;
 
-    if (role === 'rider') {
+    // Use the canonical role bound to the test phone, not the client-supplied role,
+    // to prevent a caller from forcing a driver test account into the riders table.
+    const canonicalRole = devUser.role;
+
+    if (canonicalRole === 'rider') {
       await supabase.from('riders').upsert({ id: userId, phone }, { onConflict: 'id' });
       await applyWaitlistMembership(userId, phone, 'riders');
     } else {
@@ -154,7 +196,7 @@ router.post('/verify', otpLimiter, async (req, res) => {
       await applyWaitlistMembership(userId, phone, 'drivers');
     }
 
-    return res.json({ session: data.session, user: { id: userId, phone, role } });
+    return res.json({ session: data.session, user: { id: userId, phone, role: canonicalRole } });
   }
 
   // ------------------------------------------------------------------
@@ -182,10 +224,13 @@ router.post('/verify', otpLimiter, async (req, res) => {
       .maybeSingle();
 
     if (!existingDriver) {
-      // Allow the session through but signal the app that approval is pending
+      // Driver account exists in Auth but has no approved profile row.
+      // Return 403 WITHOUT a session — issuing a session in a rejection response
+      // would let the client silently bypass the approval gate by storing the
+      // token. The driver app must handle this status code and show a
+      // "pending approval" screen without establishing a local session.
       return res.status(403).json({
-        error:   'Driver account pending approval. Please contact Wasel support.',
-        session: data.session,
+        error: 'Driver account pending approval. Please contact Wasel support.',
       });
     }
 
@@ -197,12 +242,24 @@ router.post('/verify', otpLimiter, async (req, res) => {
 
 // ----------------------------------------------------------------
 // POST /api/auth/dev-login — DEV ONLY, never runs in production
+//
+// SECURITY NOTE: This endpoint exists at a well-known path and issues real
+// Supabase sessions for test accounts. It is blocked in production (returns
+// 404 so its existence is not disclosed). Ensure NODE_ENV='production' is set
+// in all production and production-adjacent deployments. Any hit to this
+// endpoint is logged below for auditability.
 // ----------------------------------------------------------------
 
 router.post('/dev-login', otpLimiter, async (req, res) => {
-  if (process.env.NODE_ENV === 'production') {
+  // Allowlist pattern (same as OTP bypass) — unset or unrecognised NODE_ENV is treated
+  // as production-equivalent so the endpoint stays closed on misconfigured deploys.
+  const isDevEnv = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
+  if (!isDevEnv) {
     return res.status(404).json({ error: 'Not found' });
   }
+
+  // Audit log: record every access attempt in non-production environments.
+  console.warn(`[DEV-LOGIN] Endpoint hit — role="${req.body?.role}" ip="${req.ip}" env="${process.env.NODE_ENV}"`);
 
   const { role } = req.body;
   if (role !== 'rider' && role !== 'driver') {
@@ -225,7 +282,7 @@ router.post('/dev-login', otpLimiter, async (req, res) => {
       phone:         creds.phone,
       phone_confirm: true,
     });
-    if (createErr) return res.status(500).json({ error: createErr.message });
+    if (createErr) return res.status(500).json({ error: 'Failed to initialise dev user' });
 
     ({ data, error } = await supabase.auth.signInWithPassword({
       email:    creds.email,
@@ -234,7 +291,7 @@ router.post('/dev-login', otpLimiter, async (req, res) => {
   }
 
   if (error || !data.session) {
-    return res.status(500).json({ error: error?.message || 'Dev login failed' });
+    return res.status(500).json({ error: 'Dev login failed' });
   }
 
   const userId = data.user!.id;

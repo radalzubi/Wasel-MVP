@@ -280,6 +280,11 @@ const PLACES: Place[] = [
 
 // ----------------------------------------------------------------
 // GET /api/explore
+// Rate-limiting note: this endpoint is unauthenticated and intentionally
+// serves static, hardcoded data (no DB queries). The global 100 req/min
+// limit applied in index.ts is accepted as sufficient for the MVP.
+// If the data source changes to a live DB query, add a dedicated
+// 30 req/min limiter here.
 // ----------------------------------------------------------------
 
 router.get('/', (req: Request, res: Response) => {

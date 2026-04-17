@@ -4,12 +4,15 @@ import { supabase } from '../lib/supabase';
 
 const router = Router();
 
+// Jordanian mobile numbers: +9627[789]XXXXXXX (11 digits after country code)
+const JORDAN_PHONE_REGEX = /^\+9627[789]\d{7}$/;
+
 const WaitlistSchema = z.object({
-  phone: z.string().min(8).max(20),
+  phone: z.string().regex(JORDAN_PHONE_REGEX, 'Phone must be a valid Jordanian mobile number (+9627XXXXXXXX)'),
   name: z.string().min(1).max(100),
   role: z.enum(['rider', 'driver']),
-  city: z.string().optional(),
-  vehicle_type: z.string().optional(),
+  city: z.string().max(100).optional(),
+  vehicle_type: z.string().max(100).optional(),
   referral_code: z.string().optional(),
 });
 

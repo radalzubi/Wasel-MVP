@@ -12,6 +12,7 @@
     "@react-native-async-storage/async-storage": "^1.23.1",
     "@supabase/supabase-js": "^2.103.3",
     "expo": "~54.0.33",
+    "expo-secure-store": "~14.0.1",
     "expo-constants": "~18.0.13",
     "expo-linking": "~8.0.11",
     "expo-location": "~19.0.8",

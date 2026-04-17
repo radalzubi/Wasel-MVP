@@ -16,7 +16,7 @@ const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 // Amman default center
 const AMMAN = { latitude: 31.9539, longitude: 35.9106 };
 
-type TripStatus = 'idle' | 'searching' | 'dispatching' | 'accepted' | 'en_route' | 'arrived' | 'in_progress' | 'completed';
+type TripStatus = 'idle' | 'searching' | 'dispatching' | 'accepted' | 'en_route' | 'arrived' | 'in_progress' | 'completed' | 'cancelled';
 
 interface LatLng { latitude: number; longitude: number; }
 
@@ -89,6 +89,8 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!tripId) return;
 
+    // Race-condition guard: fetch current status immediately after subscribing
+    // so we don't miss any updates that arrived between trip creation and subscription setup.
     const channel = supabase
       .channel(`trip-${tripId}`)
       .on('postgres_changes', {
@@ -112,7 +114,27 @@ export default function HomeScreen() {
           }, 3000);
         }
       })
-      .subscribe();
+      .subscribe(async () => {
+        // Once subscribed, poll for the latest status to catch any updates missed
+        // during the window between trip creation and subscription establishment.
+        try {
+          const session = await supabase.auth.getSession();
+          const token = session.data.session?.access_token;
+          if (!token) return;
+          const res = await fetch(`${API_URL}/api/trips/${tripId}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const currentStatus = data.status as TripStatus;
+            if (currentStatus && currentStatus !== 'requested') {
+              setTripStatus(currentStatus);
+            }
+          }
+        } catch {
+          // Non-fatal: Realtime events will still arrive going forward
+        }
+      });
 
     return () => { supabase.removeChannel(channel); };
   }, [tripId]);
@@ -173,6 +195,7 @@ export default function HomeScreen() {
           pickup_address: pickup,
           dropoff_address: dropoff,
           payment_method: 'cash',
+          ...(fare != null ? { fare_amount: parseFloat(fare) } : {}),
         }),
       });
 
@@ -182,7 +205,8 @@ export default function HomeScreen() {
       setTripId(data.tripId);
       setTripStatus('dispatching');
     } catch (err: unknown) {
-      Alert.alert(t('error'), err instanceof Error ? err.message : t('somethingWrong'));
+      // Do not surface raw API error messages to the user.
+      Alert.alert(t('error'), t('somethingWrong') || 'Something went wrong. Please try again.');
       setTripStatus('idle');
     }
   }
@@ -209,6 +233,11 @@ export default function HomeScreen() {
     setTripStatus('idle');
     setTripId(null);
     setDriverLocation(null);
+    setDropoff('');
+    setDropoffCoords(null);
+    setFare(null);
+    fareAnim.setValue(0);
+    Animated.timing(sheetAnim, { toValue: 0, duration: 200, useNativeDriver: false }).start();
   }
 
   const statusLabel: Record<TripStatus, string> = {
@@ -220,6 +249,7 @@ export default function HomeScreen() {
     arrived: t('driverArrived'),
     in_progress: t('tripInProgress'),
     completed: t('tripComplete'),
+    cancelled: 'Trip Cancelled',
   };
 
   const isActiveTrip = tripStatus !== 'idle';

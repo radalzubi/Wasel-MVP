@@ -71,6 +71,7 @@ const translations: Record<string, Record<Language, string>> = {
   enterNamePhone: { en: 'Please enter your name and phone number.', ar: 'يرجى إدخال اسمك ورقم هاتفك.' },
   error: { en: 'Error', ar: 'خطأ' },
   somethingWrong: { en: 'Something went wrong', ar: 'حدث خطأ ما' },
+  otpSendFailed: { en: 'Failed to send OTP. Please try again.', ar: 'فشل إرسال رمز التحقق. يرجى المحاولة مرة أخرى.' },
 
   // Waitlist - Driver
   joinAsDriver: { en: 'Join as a driver', ar: 'انضم كسائق' },
@@ -93,10 +94,16 @@ const translations: Record<string, Record<Language, string>> = {
   estimatedFareLabel: { en: 'Estimated fare', ar: 'الأجرة التقديرية' },
   decline: { en: 'Decline', ar: 'رفض' },
   accept: { en: 'Accept', ar: 'قبول' },
-  iArrived: { en: "I've arrived", ar: 'لقد وصلت' },
-  startTrip: { en: 'Start trip', ar: 'ابدأ الرحلة' },
-  completeTrip: { en: 'Complete trip', ar: 'أنهِ الرحلة' },
+  iArrived: { en: "I've Arrived", ar: 'لقد وصلت' },
+  startTrip: { en: 'Begin Trip', ar: 'ابدأ الرحلة' },
+  startDrive: { en: 'Start Drive', ar: 'ابدأ القيادة' },
+  completeTrip: { en: 'Complete Trip', ar: 'أنهِ الرحلة' },
   driverApproval: { en: 'Driver accounts are subject to approval', ar: 'حسابات السائقين خاضعة للموافقة' },
+  drivingToPickup: { en: 'Driving to Pickup', ar: 'في الطريق لموقع الانطلاق' },
+  driverAccepted: { en: 'Driver Accepted', ar: 'قبل السائق الرحلة' },
+  driverArrived: { en: 'Driver Arrived', ar: 'وصل السائق' },
+  tripInProgress: { en: 'Trip in Progress', ar: 'الرحلة جارية' },
+  tripComplete: { en: 'Trip Complete', ar: 'اكتملت الرحلة' },
 
   // General
   earlyMember: { en: 'Early Member', ar: 'عضو مبكر' },

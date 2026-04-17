@@ -17,7 +17,10 @@ app.use(helmet());
 // but should be tightened once domains are finalised.
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
-  : '*';
+  : (() => {
+      console.warn('[SECURITY] ALLOWED_ORIGINS is not set — CORS is open to all origins (*). Set this variable in production.');
+      return '*';
+    })();
 
 app.use(cors({
   origin: allowedOrigins,

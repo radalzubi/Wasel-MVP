@@ -42,12 +42,12 @@ export default function DriverVerifyScreen() {
       setLoading(false);
 
       if (res.status === 403) {
+        // Backend deliberately omits the session on 403 — do not store credentials
+        // for an unapproved driver. Show an informational alert and stay on this screen.
         Alert.alert(
           'Account Pending Approval',
           'Your driver account is under review. Contact Wasel support to get approved.',
         );
-        await supabase.auth.setSession(data.session);
-        router.replace('/(app)/dashboard');
         return;
       }
 

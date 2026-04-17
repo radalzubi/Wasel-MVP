@@ -58,6 +58,19 @@ export default function DriverWaitlistScreen() {
       return;
     }
 
+    // Normalize phone: strip spaces/dashes, ensure +962 prefix
+    let normalizedPhone = phone.trim().replace(/[\s\-]/g, '');
+    if (!normalizedPhone.startsWith('+')) {
+      normalizedPhone = normalizedPhone.startsWith('0')
+        ? `+962${normalizedPhone.slice(1)}`
+        : `+962${normalizedPhone}`;
+    }
+    const jordanPhoneRegex = /^\+9627[789]\d{7}$/;
+    if (!jordanPhoneRegex.test(normalizedPhone)) {
+      Alert.alert(t('error'), 'Please enter a valid Jordanian mobile number (e.g. 07X XXX XXXX).');
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/api/waitlist`, {
@@ -65,7 +78,7 @@ export default function DriverWaitlistScreen() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: name.trim(),
-          phone: phone.trim(),
+          phone: normalizedPhone,
           city: city.trim() || undefined,
           vehicle_type: vehicleType || undefined,
           role: 'driver',
@@ -127,7 +140,7 @@ export default function DriverWaitlistScreen() {
 
               {/* dispatch weight bar */}
               <View style={styles.weightRow}>
-                <Text style={styles.weightLabel}>Dispatch weight</Text>
+                <Text style={styles.weightLabel}>{t('dispatchWeight')}</Text>
                 <View style={styles.weightBarTrack}>
                   <View
                     style={[
