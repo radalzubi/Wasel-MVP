@@ -42,11 +42,15 @@ import waitlistRouter from './routes/waitlist';
 import authRouter from './routes/auth';
 import tripsRouter from './routes/trips';
 import driversRouter from './routes/drivers';
+import ridersRouter from './routes/riders';
+import exploreRouter from './routes/explore';
 
 app.use('/api/waitlist', waitlistRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/trips', tripsRouter);
 app.use('/api/drivers', driversRouter);
+app.use('/api/riders', ridersRouter);
+app.use('/api/explore', exploreRouter);
 
 app.listen(PORT, () => {
   console.log(`Wasel backend running on port ${PORT}`);
