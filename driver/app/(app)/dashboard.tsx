@@ -149,6 +149,7 @@ export default function DashboardScreen() {
 
     const session = await supabase.auth.getSession();
     const token = session.data.session?.access_token;
+    if (!token) return;
     await fetch(`${API_URL}/api/drivers/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },

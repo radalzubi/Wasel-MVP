@@ -5,40 +5,17 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { supabase } from '../../lib/supabase';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 export default function LoginScreen() {
+  const { t, language, toggleLanguage } = useLanguage();
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
-  const [devLoading, setDevLoading] = useState(false);
-
-  async function handleDevLogin() {
-    setDevLoading(true);
-    try {
-      const res = await fetch(`${API_URL}/api/auth/dev-login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: 'rider' }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Dev login failed');
-      await supabase.auth.setSession({
-        access_token: data.session.access_token,
-        refresh_token: data.session.refresh_token,
-      });
-      // AuthContext picks up the session change automatically
-    } catch (err: unknown) {
-      Alert.alert('Dev login failed', err instanceof Error ? err.message : 'Unknown error');
-    } finally {
-      setDevLoading(false);
-    }
-  }
 
   async function handleSendOTP() {
     const cleaned = phone.trim();
     if (!cleaned) {
-      Alert.alert('Enter your phone number');
+      Alert.alert(t('enterPhone'));
       return;
     }
 
@@ -50,7 +27,7 @@ export default function LoginScreen() {
     setLoading(false);
 
     if (error) {
-      Alert.alert('Error', error.message);
+      Alert.alert(t('error'), error.message);
       return;
     }
 
@@ -63,13 +40,20 @@ export default function LoginScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={styles.inner} keyboardShouldPersistTaps="handled">
+        {/* Language toggle */}
+        <View style={styles.langRow}>
+          <TouchableOpacity style={styles.langToggle} onPress={toggleLanguage}>
+            <Text style={styles.langToggleText}>{language === 'en' ? 'AR' : 'EN'}</Text>
+          </TouchableOpacity>
+        </View>
+
         <View style={styles.header}>
           <Text style={styles.logo}>وصل</Text>
           <Text style={styles.logoEn}>Wasel</Text>
         </View>
 
-        <Text style={styles.title}>Enter your phone number</Text>
-        <Text style={styles.subtitle}>We'll send you a verification code</Text>
+        <Text style={styles.title}>{t('enterPhone')}</Text>
+        <Text style={styles.subtitle}>{t('sendCodeSubtitle')}</Text>
 
         <View style={styles.inputRow}>
           <View style={styles.countryCode}>
@@ -77,7 +61,7 @@ export default function LoginScreen() {
           </View>
           <TextInput
             style={styles.input}
-            placeholder="7X XXX XXXX"
+            placeholder={t('phonePlaceholder')}
             placeholderTextColor="#555"
             value={phone}
             onChangeText={setPhone}
@@ -94,25 +78,22 @@ export default function LoginScreen() {
         >
           {loading
             ? <ActivityIndicator color="#000" />
-            : <Text style={styles.buttonText}>Send Code</Text>
+            : <Text style={styles.buttonText}>{t('sendCode')}</Text>
           }
         </TouchableOpacity>
 
-        <Text style={styles.disclaimer}>
-          By continuing you agree to our Terms of Service
-        </Text>
+        <Text style={styles.disclaimer}>{t('disclaimer')}</Text>
 
         {__DEV__ && (
           <TouchableOpacity
-            style={styles.devButton}
-            onPress={handleDevLogin}
-            disabled={devLoading}
+            style={styles.devHint}
+            onPress={() => setPhone('790000001')}
             activeOpacity={0.7}
           >
-            {devLoading
-              ? <ActivityIndicator color="#F5A623" size="small" />
-              : <Text style={styles.devButtonText}>⚡ Dev: Skip Auth (Rider)</Text>
-            }
+            <Text style={styles.devHintText}>
+              Dev mode · Phone: +962790000001 · Code: 123456
+            </Text>
+            <Text style={styles.devHintSub}>Tap to pre-fill phone</Text>
           </TouchableOpacity>
         )}
       </ScrollView>
@@ -123,6 +104,13 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0A0A0A' },
   inner: { flexGrow: 1, justifyContent: 'center', padding: 28 },
+  langRow: { alignItems: 'flex-end', marginBottom: 16 },
+  langToggle: {
+    backgroundColor: '#161616', borderRadius: 8,
+    paddingHorizontal: 12, paddingVertical: 6,
+    borderWidth: 1, borderColor: '#2A2A2A',
+  },
+  langToggleText: { color: '#F5A623', fontSize: 13, fontWeight: '700' },
   header: { alignItems: 'center', marginBottom: 48 },
   logo: { fontSize: 52, fontWeight: '700', color: '#F5A623' },
   logoEn: { fontSize: 28, fontWeight: '700', color: '#FFF', marginTop: -6, letterSpacing: 4 },
@@ -159,14 +147,15 @@ const styles = StyleSheet.create({
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: '#000', fontWeight: '700', fontSize: 17 },
   disclaimer: { color: '#444', fontSize: 12, textAlign: 'center', marginTop: 20 },
-  devButton: {
-    marginTop: 24,
+  devHint: {
+    marginTop: 32,
+    backgroundColor: '#0D1117',
     borderWidth: 1,
-    borderColor: '#F5A623',
-    borderRadius: 12,
-    paddingVertical: 12,
+    borderColor: '#1E3A1E',
+    borderRadius: 10,
+    padding: 14,
     alignItems: 'center',
-    opacity: 0.7,
   },
-  devButtonText: { color: '#F5A623', fontSize: 13, fontWeight: '600' },
+  devHintText: { color: '#4CAF50', fontSize: 12, fontWeight: '600', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  devHintSub: { color: '#2A5C2A', fontSize: 11, marginTop: 4 },
 });

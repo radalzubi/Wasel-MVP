@@ -5,9 +5,11 @@ import {
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { supabase } from '../../lib/supabase';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 export default function DriverVerifyScreen() {
   const { phone } = useLocalSearchParams<{ phone: string }>();
+  const { t } = useLanguage();
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
   const [resendTimer, setResendTimer] = useState(30);
@@ -16,14 +18,14 @@ export default function DriverVerifyScreen() {
   useEffect(() => {
     inputRef.current?.focus();
     const interval = setInterval(() => {
-      setResendTimer((t) => (t > 0 ? t - 1 : 0));
+      setResendTimer((prev) => (prev > 0 ? prev - 1 : 0));
     }, 1000);
     return () => clearInterval(interval);
   }, []);
 
   async function handleVerify() {
     if (otp.length < 6) {
-      Alert.alert('Enter the 6-digit code');
+      Alert.alert(t('enterCode'));
       return;
     }
 
@@ -64,23 +66,29 @@ export default function DriverVerifyScreen() {
     >
       <View style={styles.inner}>
         <TouchableOpacity style={styles.back} onPress={() => router.back()}>
-          <Text style={styles.backText}>← Back</Text>
+          <Text style={styles.backText}>{t('back')}</Text>
         </TouchableOpacity>
 
-        <Text style={styles.title}>Enter the code</Text>
-        <Text style={styles.subtitle}>Sent to {phone}</Text>
+        <Text style={styles.title}>{t('enterCode')}</Text>
+        <Text style={styles.subtitle}>{t('sentTo')} {phone}</Text>
 
         <TextInput
           ref={inputRef}
           style={styles.otpInput}
           value={otp}
-          onChangeText={(t) => setOtp(t.replace(/\D/g, '').slice(0, 6))}
+          onChangeText={(text) => setOtp(text.replace(/\D/g, '').slice(0, 6))}
           keyboardType="number-pad"
           maxLength={6}
           placeholder="• • • • • •"
           placeholderTextColor="#333"
           textAlign="center"
         />
+
+        {__DEV__ && (
+          <TouchableOpacity style={styles.devHint} onPress={() => setOtp('123456')} activeOpacity={0.7}>
+            <Text style={styles.devHintText}>Dev: use 123456</Text>
+          </TouchableOpacity>
+        )}
 
         <TouchableOpacity
           style={[styles.button, (loading || otp.length < 6) && styles.buttonDisabled]}
@@ -90,13 +98,13 @@ export default function DriverVerifyScreen() {
         >
           {loading
             ? <ActivityIndicator color="#000" />
-            : <Text style={styles.buttonText}>Verify</Text>
+            : <Text style={styles.buttonText}>{t('verify')}</Text>
           }
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.resend} onPress={handleResend} disabled={resendTimer > 0}>
           <Text style={[styles.resendText, resendTimer > 0 && styles.resendDisabled]}>
-            {resendTimer > 0 ? `Resend code in ${resendTimer}s` : 'Resend code'}
+            {resendTimer > 0 ? `${t('resendIn')} ${resendTimer}${t('seconds')}` : t('resendCode')}
           </Text>
         </TouchableOpacity>
       </View>
@@ -120,7 +128,21 @@ const styles = StyleSheet.create({
     fontSize: 36,
     color: '#FFF',
     letterSpacing: 12,
-    marginBottom: 24,
+    marginBottom: 12,
+  },
+  devHint: {
+    backgroundColor: '#0D1117',
+    borderWidth: 1,
+    borderColor: '#1E3A1E',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  devHintText: {
+    color: '#4CAF50', fontSize: 12, fontWeight: '600',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   button: {
     backgroundColor: '#F5A623',

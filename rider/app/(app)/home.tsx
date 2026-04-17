@@ -6,7 +6,9 @@ import {
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLanguage } from '../../contexts/LanguageContext';
 import { supabase } from '../../lib/supabase';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
@@ -18,8 +20,13 @@ type TripStatus = 'idle' | 'searching' | 'dispatching' | 'accepted' | 'en_route'
 
 interface LatLng { latitude: number; longitude: number; }
 
+interface RiderProfile {
+  is_waitlist_member?: boolean;
+}
+
 export default function HomeScreen() {
   const { user, signOut } = useAuth();
+  const { t, language, toggleLanguage } = useLanguage();
   const mapRef = useRef<MapView>(null);
 
   const [location, setLocation] = useState<LatLng | null>(null);
@@ -32,22 +39,48 @@ export default function HomeScreen() {
   const [driverLocation, setDriverLocation] = useState<LatLng | null>(null);
   const [activeInput, setActiveInput] = useState<'pickup' | 'dropoff' | null>(null);
   const [fare, setFare] = useState<string | null>(null);
+  const [riderProfile, setRiderProfile] = useState<RiderProfile | null>(null);
 
   // Get user location on mount
   useEffect(() => {
     (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') return;
 
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
-      setLocation(coords);
-      setPickupCoords(coords);
-      setPickup('Current Location');
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+        const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+        setLocation(coords);
+        setPickupCoords(coords);
+        setPickup(t('currentLocation'));
 
-      mapRef.current?.animateToRegion({ ...coords, latitudeDelta: 0.01, longitudeDelta: 0.01 }, 800);
+        mapRef.current?.animateToRegion({ ...coords, latitudeDelta: 0.01, longitudeDelta: 0.01 }, 800);
+      } catch {
+        // Location unavailable — fall back to Amman center
+      }
     })();
   }, []);
+
+  // Fetch rider profile (for waitlist badge)
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      try {
+        const session = await supabase.auth.getSession();
+        const token = session.data.session?.access_token;
+        if (!token) return;
+        const res = await fetch(`${API_URL}/api/riders/me`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setRiderProfile(data);
+        }
+      } catch {
+        // Non-fatal: badge just won't appear
+      }
+    })();
+  }, [user]);
 
   // Subscribe to trip updates via Supabase Realtime
   useEffect(() => {
@@ -91,7 +124,7 @@ export default function HomeScreen() {
       // Estimate fare (simple distance-based)
       if (pickupCoords) {
         const dist = haversineKm(pickupCoords.latitude, pickupCoords.longitude, coord.latitude, coord.longitude);
-        const estimated = Math.max(1.5, 0.5 + dist * 0.35); // base 0.5 JD + 0.35/km
+        const estimated = Math.max(1.5, 0.5 + dist * 0.35);
         setFare(estimated.toFixed(2));
       }
     }
@@ -99,7 +132,7 @@ export default function HomeScreen() {
 
   async function handleRequestRide() {
     if (!pickupCoords || !dropoffCoords) {
-      Alert.alert('Set pickup and dropoff', 'Tap the map to set your destination.');
+      Alert.alert(t('setPickupDropoff'), t('tapMapDest2'));
       return;
     }
 
@@ -132,7 +165,7 @@ export default function HomeScreen() {
       setTripId(data.tripId);
       setTripStatus('dispatching');
     } catch (err: unknown) {
-      Alert.alert('Error', err instanceof Error ? err.message : 'Something went wrong');
+      Alert.alert(t('error'), err instanceof Error ? err.message : t('somethingWrong'));
       setTripStatus('idle');
     }
   }
@@ -163,13 +196,13 @@ export default function HomeScreen() {
 
   const statusLabel: Record<TripStatus, string> = {
     idle: '',
-    searching: 'Finding drivers...',
-    dispatching: 'Contacting driver...',
-    accepted: 'Driver accepted!',
-    en_route: 'Driver on the way',
-    arrived: 'Driver has arrived',
-    in_progress: 'Trip in progress',
-    completed: 'Trip complete! 🎉',
+    searching: t('findingDrivers'),
+    dispatching: t('contactingDriver'),
+    accepted: t('driverAccepted'),
+    en_route: t('driverOnWay'),
+    arrived: t('driverArrived'),
+    in_progress: t('tripInProgress'),
+    completed: t('tripComplete'),
   };
 
   return (
@@ -210,10 +243,23 @@ export default function HomeScreen() {
       {/* Top bar */}
       <SafeAreaView style={styles.topBar} edges={['top']}>
         <View style={styles.topBarInner}>
-          <Text style={styles.topLogo}>وصل</Text>
-          <TouchableOpacity onPress={signOut}>
-            <Text style={styles.signOut}>Sign out</Text>
-          </TouchableOpacity>
+          <View style={styles.logoRow}>
+            <Text style={styles.topLogo}>وصل</Text>
+            {riderProfile?.is_waitlist_member && (
+              <View style={styles.earlyBadge}>
+                <Text style={styles.earlyBadgeStar}>⭐</Text>
+                <Text style={styles.earlyBadgeText}>{t('earlyMember')}</Text>
+              </View>
+            )}
+          </View>
+          <View style={styles.topActions}>
+            <TouchableOpacity style={styles.langToggle} onPress={toggleLanguage}>
+              <Text style={styles.langToggleText}>{language === 'en' ? 'AR' : 'EN'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={signOut}>
+              <Text style={styles.signOut}>{t('signOut')}</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </SafeAreaView>
 
@@ -221,7 +267,7 @@ export default function HomeScreen() {
       <View style={styles.bottomSheet}>
         {tripStatus === 'idle' ? (
           <>
-            <Text style={styles.sheetTitle}>Where to?</Text>
+            <Text style={styles.sheetTitle}>{t('whereTo')}</Text>
 
             {/* Pickup input */}
             <TouchableOpacity
@@ -230,7 +276,7 @@ export default function HomeScreen() {
             >
               <View style={[styles.dot, { backgroundColor: '#F5A623' }]} />
               <Text style={[styles.inputText, !pickup && styles.placeholder]}>
-                {pickup || 'Set pickup location'}
+                {pickup || t('setPickup')}
               </Text>
             </TouchableOpacity>
 
@@ -243,16 +289,16 @@ export default function HomeScreen() {
             >
               <View style={[styles.dot, { backgroundColor: '#00C851' }]} />
               <Text style={[styles.inputText, !dropoff && styles.placeholder]}>
-                {dropoff || 'Tap map to set destination'}
+                {dropoff || t('tapMapDest')}
               </Text>
             </TouchableOpacity>
 
             {/* Fare estimate */}
             {fare && dropoffCoords && (
               <View style={styles.fareRow}>
-                <Text style={styles.fareLabel}>Estimated fare</Text>
+                <Text style={styles.fareLabel}>{t('estimatedFare')}</Text>
                 <Text style={styles.fareAmount}>{fare} JD</Text>
-                <Text style={styles.fareNote}>Cash payment</Text>
+                <Text style={styles.fareNote}>{t('cashPayment')}</Text>
               </View>
             )}
 
@@ -262,7 +308,7 @@ export default function HomeScreen() {
               disabled={!dropoffCoords}
               activeOpacity={0.85}
             >
-              <Text style={styles.requestButtonText}>Request Wasel</Text>
+              <Text style={styles.requestButtonText}>{t('requestWasel')}</Text>
             </TouchableOpacity>
           </>
         ) : (
@@ -276,7 +322,7 @@ export default function HomeScreen() {
 
             {tripStatus !== 'completed' && tripStatus !== 'in_progress' && (
               <TouchableOpacity style={styles.cancelButton} onPress={handleCancelTrip}>
-                <Text style={styles.cancelButtonText}>Cancel</Text>
+                <Text style={styles.cancelButtonText}>{t('cancel')}</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -308,7 +354,23 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(10,10,10,0.85)',
     borderRadius: 14, paddingHorizontal: 16, paddingVertical: 10,
   },
+  logoRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   topLogo: { fontSize: 22, fontWeight: '700', color: '#F5A623' },
+  earlyBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: 'rgba(245,166,35,0.15)',
+    borderRadius: 10, paddingHorizontal: 7, paddingVertical: 3,
+    borderWidth: 1, borderColor: 'rgba(245,166,35,0.3)',
+  },
+  earlyBadgeStar: { fontSize: 10 },
+  earlyBadgeText: { color: '#F5A623', fontSize: 10, fontWeight: '600' },
+  topActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  langToggle: {
+    backgroundColor: '#1E1E1E', borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 5,
+    borderWidth: 1, borderColor: '#2A2A2A',
+  },
+  langToggleText: { color: '#F5A623', fontSize: 12, fontWeight: '700' },
   signOut: { color: '#555', fontSize: 13 },
   bottomSheet: {
     position: 'absolute', bottom: 0, left: 0, right: 0,

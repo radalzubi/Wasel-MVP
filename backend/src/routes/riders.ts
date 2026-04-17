@@ -8,11 +8,12 @@ const router = Router();
 router.get('/me', requireAuth, requireRider, async (req: AuthRequest, res) => {
   const { data, error } = await supabase
     .from('riders')
-    .select('id, phone, name, is_waitlist_member, waitlist_joined_at, waitlist_position, created_at')
+    .select('*')
     .eq('id', req.userId!)
-    .single();
+    .maybeSingle();
 
-  if (error || !data) return res.status(404).json({ error: 'Rider not found' });
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data) return res.status(404).json({ error: 'Rider not found' });
 
   res.json(data);
 });
