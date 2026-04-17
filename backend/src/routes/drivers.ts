@@ -5,15 +5,16 @@ import { requireAuth, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
+const LocationSchema = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+});
+
 // PATCH /api/drivers/location — update driver GPS
 router.patch('/location', requireAuth, async (req: AuthRequest, res) => {
-  const { lat, lng } = req.body;
-  if (typeof lat !== 'number' || typeof lng !== 'number') {
-    return res.status(400).json({ error: 'lat and lng required' });
-  }
-  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-    return res.status(400).json({ error: 'Invalid coordinates' });
-  }
+  const parsed = LocationSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const { lat, lng } = parsed.data;
 
   const { error } = await supabase
     .from('drivers')
@@ -22,7 +23,7 @@ router.patch('/location', requireAuth, async (req: AuthRequest, res) => {
     })
     .eq('id', req.userId);
 
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) return res.status(500).json({ error: 'Failed to update location' });
   res.json({ ok: true });
 });
 
@@ -40,7 +41,7 @@ router.patch('/status', requireAuth, async (req: AuthRequest, res) => {
     .update(parsed.data)
     .eq('id', req.userId);
 
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) return res.status(500).json({ error: 'Failed to update status' });
   res.json({ ok: true });
 });
 

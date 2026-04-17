@@ -11,8 +11,16 @@ const PORT = process.env.PORT || 3001;
 
 // Security middleware
 app.use(helmet());
+// In production ALLOWED_ORIGINS should be set to a comma-separated list of
+// allowed origins (e.g. "https://app.wasel.jo,https://rider.wasel.jo").
+// Falling back to '*' is acceptable for a mobile-app-only API (no cookies),
+// but should be tightened once domains are finalised.
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
+  : '*';
+
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
+  origin: allowedOrigins,
   methods: ['GET', 'POST', 'PATCH'],
 }));
 app.use(express.json({ limit: '10kb' }));

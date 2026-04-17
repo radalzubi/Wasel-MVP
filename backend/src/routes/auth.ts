@@ -23,13 +23,15 @@ const VerifySchema = z.object({
 // Dev / test user constants
 // ----------------------------------------------------------------
 
-/** Test phones that bypass real OTP in non-production environments. */
-const TEST_PHONES = new Set(['+96279000001', '+96279000002']);
+/** Test phones that bypass real OTP in non-production environments.
+ *  Must match the Jordanian regex: +9627[789]\d{7}
+ *  +962 79 0000001 = valid format (9 digits after country code) */
+const TEST_PHONES = new Set(['+962790000001', '+962790000002']);
 const TEST_OTP   = '123456';
 
 const DEV_USERS = {
-  rider:  { email: 'test-rider@wasel.dev',  password: 'change-me-dev-password', phone: '+96279000001' },
-  driver: { email: 'test-driver@wasel.dev', password: 'change-me-dev-password', phone: '+96279000002' },
+  rider:  { email: 'test-rider@wasel.dev',  password: 'change-me-dev-password', phone: '+962790000001' },
+  driver: { email: 'test-driver@wasel.dev', password: 'change-me-dev-password', phone: '+962790000002' },
 } as const;
 
 type DevRole = keyof typeof DEV_USERS;

@@ -75,7 +75,7 @@ router.post('/:id/accept', requireAuth, requireDriver, async (req: AuthRequest, 
     .update({ status: 'accepted', driver_id: req.userId })
     .eq('id', tripId);
 
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) return res.status(500).json({ error: 'Failed to accept trip' });
   res.json({ ok: true, status: 'accepted' });
 });
 
@@ -113,7 +113,7 @@ router.post('/:id/status', requireAuth, async (req: AuthRequest, res) => {
   if (parsed.data.status === 'completed') updates.completed_at = new Date().toISOString();
 
   const { error } = await supabase.from('trips').update(updates).eq('id', req.params.id);
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) return res.status(500).json({ error: 'Failed to update trip status' });
   res.json({ ok: true, status: parsed.data.status });
 });
 
