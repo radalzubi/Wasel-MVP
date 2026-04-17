@@ -42,14 +42,7 @@ export default function DriverVerifyScreen() {
       return;
     }
 
-    // Upsert driver profile
-    if (data.user) {
-      await supabase.from('drivers').upsert(
-        { id: data.user.id, phone: phone! },
-        { onConflict: 'id' }
-      );
-    }
-
+    // Driver profiles are created by admin onboarding — do not auto-create here.
     router.replace('/(app)/dashboard');
   }
 

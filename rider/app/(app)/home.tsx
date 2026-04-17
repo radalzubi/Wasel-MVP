@@ -373,11 +373,12 @@ const styles = StyleSheet.create({
   langToggleText: { color: '#F5A623', fontSize: 12, fontWeight: '700' },
   signOut: { color: '#555', fontSize: 13 },
   bottomSheet: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
+    // Sit on top of the 60px tab bar so content isn't hidden behind it
+    position: 'absolute', bottom: 60, left: 0, right: 0,
     backgroundColor: '#111',
     borderTopLeftRadius: 24, borderTopRightRadius: 24,
     padding: 24,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+    paddingBottom: Platform.OS === 'ios' ? 8 : 16,
     shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.3, shadowRadius: 10,
     elevation: 10,
   },
