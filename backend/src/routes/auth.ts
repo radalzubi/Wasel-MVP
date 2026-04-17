@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseAdmin } from '../lib/supabase';
 import { otpLimiter } from '../index';
 
 const router = Router();
@@ -59,7 +59,7 @@ function devUserForPhone(phone: string): { role: DevRole; email: string; passwor
  * waitlist_position (= number of waitlist rows created on or before theirs).
  */
 async function applyWaitlistMembership(userId: string, phone: string, table: 'riders' | 'drivers'): Promise<void> {
-  const { data: wl } = await supabase
+  const { data: wl } = await supabaseAdmin
     .from('waitlist')
     .select('created_at')
     .eq('phone', phone)
@@ -68,12 +68,12 @@ async function applyWaitlistMembership(userId: string, phone: string, table: 'ri
   if (!wl) return;
 
   // Count waitlist entries created at or before this one to determine position
-  const { count } = await supabase
+  const { count } = await supabaseAdmin
     .from('waitlist')
     .select('*', { count: 'exact', head: true })
     .lte('created_at', wl.created_at);
 
-  await supabase
+  await supabaseAdmin
     .from(table)
     .update({
       is_waitlist_member: true,
@@ -102,6 +102,65 @@ function isPhoneThrottled(phone: string): boolean {
   if (entry.count >= PHONE_OTP_MAX) return true;
   entry.count++;
   return false;
+}
+
+// ----------------------------------------------------------------
+// Dev helper: ensure a clean drivers profile row exists
+//
+// In dev mode the test auth users have stable UUIDs (Supabase Auth
+// generates them deterministically from the email). However, if the
+// Supabase Auth DB was wiped and re-seeded, a new UUID would be
+// assigned while the old drivers row (with a different UUID) still
+// holds the test phone number, causing a unique-constraint violation
+// on the phone column.  This helper clears any stale conflicting row
+// before the upsert so the dev environment always converges to a
+// consistent state.
+// ----------------------------------------------------------------
+
+async function ensureDevDriverProfile(userId: string, phone: string): Promise<void> {
+  // Remove any stale row that holds the phone but belongs to a different user.
+  // This is safe in dev mode: there should only ever be one test driver.
+  // supabaseAdmin is used here (and in all DB-write helpers in this file) to
+  // avoid the user-JWT pollution described in lib/supabase.ts.
+  await supabaseAdmin
+    .from('drivers')
+    .delete()
+    .eq('phone', phone)
+    .neq('id', userId);
+
+  const { error } = await supabaseAdmin.from('drivers').upsert({
+    id:                userId,
+    phone,
+    name:              'Test Driver',
+    vehicle_make:      'Toyota',
+    vehicle_model:     'Corolla',
+    vehicle_plate:     'TEST-001',
+    subscription_tier: 2,
+    became_available_at: new Date().toISOString(),
+  }, { onConflict: 'id' });
+
+  if (error) {
+    // Re-throw so the caller can return a proper 500.
+    throw new Error(`Driver upsert failed: ${error.message}`);
+  }
+}
+
+async function ensureDevRiderProfile(userId: string, phone: string): Promise<void> {
+  // Same stale-row cleanup for the rider side.
+  await supabaseAdmin
+    .from('riders')
+    .delete()
+    .eq('phone', phone)
+    .neq('id', userId);
+
+  const { error } = await supabaseAdmin.from('riders').upsert(
+    { id: userId, phone },
+    { onConflict: 'id' },
+  );
+
+  if (error) {
+    throw new Error(`Rider upsert failed: ${error.message}`);
+  }
 }
 
 // ----------------------------------------------------------------
@@ -180,20 +239,18 @@ router.post('/verify', otpLimiter, async (req, res) => {
     // to prevent a caller from forcing a driver test account into the riders table.
     const canonicalRole = devUser.role;
 
-    if (canonicalRole === 'rider') {
-      await supabase.from('riders').upsert({ id: userId, phone }, { onConflict: 'id' });
-      await applyWaitlistMembership(userId, phone, 'riders');
-    } else {
-      await supabase.from('drivers').upsert({
-        id:               userId,
-        phone:            creds.phone,
-        name:             'Test Driver',
-        vehicle_make:     'Toyota',
-        vehicle_model:    'Corolla',
-        vehicle_plate:    'TEST-001',
-        subscription_tier: 2,
-      }, { onConflict: 'id' });
-      await applyWaitlistMembership(userId, phone, 'drivers');
+    try {
+      if (canonicalRole === 'rider') {
+        await ensureDevRiderProfile(userId, creds.phone);
+        await applyWaitlistMembership(userId, creds.phone, 'riders');
+      } else {
+        await ensureDevDriverProfile(userId, creds.phone);
+        await applyWaitlistMembership(userId, creds.phone, 'drivers');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Profile setup failed';
+      console.error('[dev/verify] profile upsert error:', msg);
+      return res.status(500).json({ error: 'Failed to create dev profile' });
     }
 
     return res.json({ session: data.session, user: { id: userId, phone, role: canonicalRole } });
@@ -213,11 +270,18 @@ router.post('/verify', otpLimiter, async (req, res) => {
   const userId = data.user!.id;
 
   if (role === 'rider') {
-    await supabase.from('riders').upsert({ id: userId, phone }, { onConflict: 'id' });
+    // supabaseAdmin: avoids user-JWT pollution from verifyOtp() above
+    const { error: upsertErr } = await supabaseAdmin
+      .from('riders')
+      .upsert({ id: userId, phone }, { onConflict: 'id' });
+    if (upsertErr) {
+      console.error('[verify] Rider upsert failed:', upsertErr.message);
+      return res.status(500).json({ error: 'Failed to create rider profile' });
+    }
     await applyWaitlistMembership(userId, phone, 'riders');
   } else {
     // Drivers must be pre-approved — check for an existing profile
-    const { data: existingDriver } = await supabase
+    const { data: existingDriver } = await supabaseAdmin
       .from('drivers')
       .select('id')
       .eq('id', userId)
@@ -268,7 +332,7 @@ router.post('/dev-login', otpLimiter, async (req, res) => {
 
   const creds = DEV_USERS[role as DevRole];
 
-  // Try signing in — if the test user doesn't exist yet, create them first
+  // Try signing in first. If the test user doesn't exist yet, create them.
   let { data, error } = await supabase.auth.signInWithPassword({
     email:    creds.email,
     password: creds.password,
@@ -282,8 +346,13 @@ router.post('/dev-login', otpLimiter, async (req, res) => {
       phone:         creds.phone,
       phone_confirm: true,
     });
-    if (createErr) return res.status(500).json({ error: 'Failed to initialise dev user' });
+    // P1 fix: "already registered" is not a fatal error — the user exists,
+    // we just need to retry sign-in (possibly the password changed via env var).
+    if (createErr && !createErr.message.toLowerCase().includes('already')) {
+      return res.status(500).json({ error: 'Failed to initialise dev user' });
+    }
 
+    // User either just created or already existed — retry sign-in.
     ({ data, error } = await supabase.auth.signInWithPassword({
       email:    creds.email,
       password: creds.password,
@@ -296,20 +365,20 @@ router.post('/dev-login', otpLimiter, async (req, res) => {
 
   const userId = data.user!.id;
 
-  if (role === 'rider') {
-    await supabase.from('riders').upsert({ id: userId, phone: creds.phone }, { onConflict: 'id' });
-    await applyWaitlistMembership(userId, creds.phone, 'riders');
-  } else {
-    await supabase.from('drivers').upsert({
-      id:               userId,
-      phone:            creds.phone,
-      name:             'Test Driver',
-      vehicle_make:     'Toyota',
-      vehicle_model:    'Corolla',
-      vehicle_plate:    'TEST-001',
-      subscription_tier: 2,
-    }, { onConflict: 'id' });
-    await applyWaitlistMembership(userId, creds.phone, 'drivers');
+  // P1 fix: use helpers that validate upsert results and handle stale
+  // phone-conflict rows that can accumulate across Supabase Auth resets.
+  try {
+    if (role === 'rider') {
+      await ensureDevRiderProfile(userId, creds.phone);
+      await applyWaitlistMembership(userId, creds.phone, 'riders');
+    } else {
+      await ensureDevDriverProfile(userId, creds.phone);
+      await applyWaitlistMembership(userId, creds.phone, 'drivers');
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Profile setup failed';
+    console.error('[dev-login] profile upsert error:', msg);
+    return res.status(500).json({ error: 'Failed to create dev profile. Check server logs.' });
   }
 
   res.json({ session: data.session, user: { id: userId, phone: creds.phone, role } });

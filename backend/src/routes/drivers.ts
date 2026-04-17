@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { supabase } from '../lib/supabase';
+import { supabaseAdmin as supabase } from '../lib/supabase';
 import { requireAuth, requireDriver, AuthRequest } from '../middleware/auth';
 
 const router = Router();
@@ -20,6 +20,10 @@ router.patch('/location', requireAuth, requireDriver, async (req: AuthRequest, r
     .from('drivers')
     .update({
       current_location: `SRID=4326;POINT(${lng} ${lat})`,
+      // Plain float columns so the dispatch engine can read them without
+      // needing PostGIS-aware queries (Supabase REST returns geometry as WKB hex).
+      location_lat: lat,
+      location_lng: lng,
     })
     .eq('id', req.userId);
 
@@ -36,9 +40,19 @@ router.patch('/status', requireAuth, requireDriver, async (req: AuthRequest, res
   const parsed = StatusSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
+  const updates: Record<string, unknown> = { ...parsed.data };
+
+  // P5: When a driver marks themselves as available, stamp became_available_at
+  // so the dispatch engine can calculate real idle-time for BMP scoring.
+  if (parsed.data.is_available === true) {
+    updates.became_available_at = new Date().toISOString();
+  } else if (parsed.data.is_available === false) {
+    updates.became_available_at = null;
+  }
+
   const { error } = await supabase
     .from('drivers')
-    .update(parsed.data)
+    .update(updates)
     .eq('id', req.userId);
 
   if (error) return res.status(500).json({ error: 'Failed to update status' });

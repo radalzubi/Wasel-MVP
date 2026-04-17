@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseAdmin } from '../lib/supabase';
 
 export interface AuthRequest extends Request {
   userId?: string;
@@ -22,7 +22,13 @@ export async function requireAuth(req: AuthRequest, res: Response, next: NextFun
   // a Supabase Auth hook) so role can be read from the token without a DB query.
   // For now, role-guarded endpoints rely on requireDriver/requireRider being
   // chained immediately after requireAuth in the route definition.
-  const { data: driver } = await supabase
+  //
+  // supabaseAdmin is used here (not supabase) to avoid the user-JWT session
+  // pollution described in lib/supabase.ts. The shared `supabase` client's
+  // in-memory auth state may hold a different user's JWT from a recent
+  // signInWithPassword() call in auth routes, causing the role lookup to run
+  // under the wrong uid and return no rows even for valid drivers.
+  const { data: driver } = await supabaseAdmin
     .from('drivers')
     .select('id')
     .eq('id', user.id)

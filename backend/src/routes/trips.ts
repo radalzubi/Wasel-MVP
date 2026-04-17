@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { supabase } from '../lib/supabase';
+import { supabaseAdmin as supabase } from '../lib/supabase';
 import { requireAuth, requireDriver, requireRider, AuthRequest } from '../middleware/auth';
 import { dispatchTrip } from '../dispatch/engine';
+import { haversineKm } from '../dispatch/geo';
 
 const router = Router();
 
@@ -15,25 +16,74 @@ function isValidUUID(id: string): boolean {
 
 // Valid trip-status state-machine transitions
 const VALID_TRANSITIONS: Record<string, string[]> = {
-  requested:   ['dispatching', 'cancelled'],   // rider can cancel before dispatch starts
-  dispatching: ['accepted', 'cancelled'],       // rider can cancel during dispatch
-  accepted:    ['en_route', 'cancelled'],
-  en_route:    ['arrived', 'cancelled'],
-  arrived:     ['in_progress', 'cancelled'],
-  in_progress: ['completed'],
-  completed:   [],
-  cancelled:   [],
+  requested:    ['dispatching', 'cancelled'],   // rider can cancel before dispatch starts
+  dispatching:  ['accepted', 'cancelled'],       // rider can cancel during dispatch
+  accepted:     ['en_route', 'cancelled'],
+  en_route:     ['arrived', 'cancelled'],
+  arrived:      ['in_progress', 'cancelled'],
+  in_progress:  ['completed'],
+  completed:    [],
+  cancelled:    [],
 };
 
+// ----------------------------------------------------------------
+// P4: Authoritative server-side fare calculation.
+//
+// Clients must NOT supply fare_amount — they receive the server's
+// calculated value in the 201 response and store it locally. This
+// prevents manipulated client payloads from overwriting business-
+// critical revenue figures in the database.
+//
+// Formula: base 0.50 JD + 0.35 JD per km, minimum 1.50 JD.
+// Rounded to 2 decimal places.
+// ----------------------------------------------------------------
+function calculateFare(
+  pickupLat: number, pickupLng: number,
+  dropoffLat: number, dropoffLng: number,
+): number {
+  const distKm = haversineKm(pickupLat, pickupLng, dropoffLat, dropoffLng);
+  return Math.round(Math.max(1.50, 0.50 + distKm * 0.35) * 100) / 100;
+}
+
+// ----------------------------------------------------------------
+// P5: Write an immutable status-change record to trip_status_history.
+// Fire-and-forget — failure does not block the main response.
+// ----------------------------------------------------------------
+function recordStatusHistory(tripId: string, status: string): void {
+  supabase
+    .from('trip_status_history')
+    .insert({ trip_id: tripId, status })
+    .then(({ error }) => {
+      if (error) console.error('[status-history] insert failed:', error.message);
+    });
+}
+
+// ----------------------------------------------------------------
+// P5: Update driver activity_score via the DB-level RPC so the
+// read-modify-write is atomic and survives concurrent requests.
+// completed=true → reward (EMA towards 1.0)
+// completed=false → penalise driver cancellation (EMA towards 0.0)
+// ----------------------------------------------------------------
+function updateDriverActivityScore(driverId: string, completed: boolean): void {
+  supabase
+    .rpc('update_driver_activity_score', { p_driver_id: driverId, p_completed: completed })
+    .then(({ error }) => {
+      if (error) console.error('[activity-score] RPC failed:', error.message);
+    });
+}
+
+// ----------------------------------------------------------------
+// Schema — fare_amount intentionally absent (calculated server-side)
+// ----------------------------------------------------------------
 const TripRequestSchema = z.object({
-  pickup_lat: z.number().min(-90).max(90),
-  pickup_lng: z.number().min(-180).max(180),
-  dropoff_lat: z.number().min(-90).max(90),
-  dropoff_lng: z.number().min(-180).max(180),
-  pickup_address: z.string().max(500).optional(),
+  pickup_lat:      z.number().min(-90).max(90),
+  pickup_lng:      z.number().min(-180).max(180),
+  dropoff_lat:     z.number().min(-90).max(90),
+  dropoff_lng:     z.number().min(-180).max(180),
+  pickup_address:  z.string().max(500).optional(),
   dropoff_address: z.string().max(500).optional(),
-  payment_method: z.enum(['cash', 'cliq']).default('cash'),
-  fare_amount: z.number().positive().optional(),
+  payment_method:  z.enum(['cash', 'cliq']).default('cash'),
+  // fare_amount is NOT accepted from clients — we calculate it here.
 });
 
 // POST /api/trips — rider requests a ride
@@ -54,13 +104,19 @@ router.post('/', requireAuth, requireRider, async (req: AuthRequest, res) => {
     return res.status(409).json({ error: 'You already have an active trip in progress.' });
   }
 
-  const { pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, pickup_address, dropoff_address, payment_method, fare_amount } = parsed.data;
+  const {
+    pickup_lat, pickup_lng, dropoff_lat, dropoff_lng,
+    pickup_address, dropoff_address, payment_method,
+  } = parsed.data;
+
+  // P4: Calculate fare server-side so the stored value is authoritative.
+  const fare_amount = calculateFare(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng);
 
   const { data: trip, error } = await supabase
     .from('trips')
     .insert({
-      rider_id: req.userId,
-      pickup_location: `SRID=4326;POINT(${pickup_lng} ${pickup_lat})`,
+      rider_id:         req.userId,
+      pickup_location:  `SRID=4326;POINT(${pickup_lng} ${pickup_lat})`,
       dropoff_location: `SRID=4326;POINT(${dropoff_lng} ${dropoff_lat})`,
       pickup_lat,
       pickup_lng,
@@ -69,18 +125,24 @@ router.post('/', requireAuth, requireRider, async (req: AuthRequest, res) => {
       pickup_address,
       dropoff_address,
       payment_method,
-      fare_amount: fare_amount ?? null,
+      fare_amount,
       status: 'requested',
     })
     .select('id')
     .single();
 
-  if (error || !trip) return res.status(500).json({ error: 'Failed to create trip' });
+  if (error || !trip) {
+    console.error('[trips POST] insert failed:', error?.message);
+    return res.status(500).json({ error: 'Failed to create trip' });
+  }
+
+  // Write initial status to audit log
+  recordStatusHistory(trip.id, 'requested');
 
   // Fire dispatch asynchronously
   dispatchTrip(trip.id, pickup_lat, pickup_lng).catch(console.error);
 
-  res.status(201).json({ tripId: trip.id, status: 'requested' });
+  res.status(201).json({ tripId: trip.id, status: 'requested', fare_amount });
 });
 
 // POST /api/trips/:id/accept — driver accepts their assigned offer
@@ -112,8 +174,13 @@ router.post('/:id/accept', requireAuth, requireDriver, async (req: AuthRequest, 
 
   if (error) return res.status(500).json({ error: 'Failed to accept trip' });
 
-  // Mark driver as unavailable while on a trip
-  await supabase.from('drivers').update({ is_available: false }).eq('id', req.userId);
+  // Mark driver as unavailable while on a trip.
+  // became_available_at is cleared (set to null) — idle time stops counting.
+  await supabase.from('drivers')
+    .update({ is_available: false, became_available_at: null })
+    .eq('id', req.userId);
+
+  recordStatusHistory(tripId, 'accepted');
 
   res.json({ ok: true, status: 'accepted' });
 });
@@ -138,22 +205,21 @@ router.post('/:id/status', requireAuth, async (req: AuthRequest, res) => {
   if (!trip) return res.status(404).json({ error: 'Trip not found' });
 
   const isDriver = trip.driver_id === req.userId;
-  const isRider = trip.rider_id === req.userId;
+  const isRider  = trip.rider_id  === req.userId;
 
-  // Both isDriver and isRider are checked above; reaching here means the caller is on this trip.
   if (!isDriver && !isRider) return res.status(403).json({ error: 'Not your trip' });
 
   // Both the rider and the driver may cancel the trip.
-  // Only the driver may advance all other statuses (en_route, arrived, in_progress, completed).
+  // Only the driver may advance all other statuses.
   if (parsed.data.status !== 'cancelled' && !isDriver) {
     return res.status(403).json({ error: 'Only the driver can advance trip status' });
   }
 
-  // Enforce state-machine: reject transitions that skip steps or re-enter terminal states.
+  // Enforce state-machine: reject illegal transitions.
   const allowedNext = VALID_TRANSITIONS[trip.status] ?? [];
   if (!allowedNext.includes(parsed.data.status)) {
     return res.status(409).json({
-      error: `Cannot transition from '${trip.status}' to '${parsed.data.status}'`,
+      error:   `Cannot transition from '${trip.status}' to '${parsed.data.status}'`,
       allowed: allowedNext,
     });
   }
@@ -166,9 +232,28 @@ router.post('/:id/status', requireAuth, async (req: AuthRequest, res) => {
   const { error } = await supabase.from('trips').update(updates).eq('id', req.params.id);
   if (error) return res.status(500).json({ error: 'Failed to update trip status' });
 
-  // Free the driver when the trip completes
+  // Write to immutable audit log
+  recordStatusHistory(req.params.id, parsed.data.status);
+
+  // Post-transition side effects
   if (parsed.data.status === 'completed' && trip.driver_id) {
-    await supabase.from('drivers').update({ is_available: true }).eq('id', trip.driver_id);
+    // Free the driver and restart their idle timer
+    await supabase.from('drivers')
+      .update({ is_available: true, became_available_at: new Date().toISOString() })
+      .eq('id', trip.driver_id);
+    // P5: Reward driver for completing a trip
+    updateDriverActivityScore(trip.driver_id, true);
+  }
+
+  if (parsed.data.status === 'cancelled' && trip.driver_id) {
+    // Free the driver regardless of who cancelled
+    await supabase.from('drivers')
+      .update({ is_available: true, became_available_at: new Date().toISOString() })
+      .eq('id', trip.driver_id);
+    // P5: Penalise driver only when they are the one cancelling an in-flight trip
+    if (isDriver && trip.status !== 'requested' && trip.status !== 'dispatching') {
+      updateDriverActivityScore(trip.driver_id, false);
+    }
   }
 
   res.json({ ok: true, status: parsed.data.status });
@@ -198,11 +283,18 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res) => {
   // that clients have no legitimate need to see and that leak algorithm details.
   const { data, error } = await supabase
     .from('trips')
-    .select('id, rider_id, driver_id, status, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, pickup_address, dropoff_address, payment_method, created_at, completed_at')
+    .select('id, rider_id, driver_id, status, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, pickup_address, dropoff_address, fare_amount, payment_method, created_at, completed_at')
     .eq('id', req.params.id)
     .maybeSingle();
 
-  if (error || !data) return res.status(404).json({ error: 'Trip not found' });
+  // P2 fix: distinguish database errors from genuine "not found".
+  // Previously, any DB error (schema mismatch, RPC error) silently became a 404,
+  // making root-cause analysis impossible and returning misleading responses.
+  if (error) {
+    console.error('[trips GET] DB error for trip', req.params.id, ':', error.message);
+    return res.status(500).json({ error: 'Failed to fetch trip' });
+  }
+  if (!data) return res.status(404).json({ error: 'Trip not found' });
 
   if (data.rider_id !== req.userId && data.driver_id !== req.userId) {
     return res.status(403).json({ error: 'Not your trip' });

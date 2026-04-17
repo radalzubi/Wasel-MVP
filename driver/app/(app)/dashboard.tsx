@@ -13,6 +13,18 @@ import { supabase } from '../../lib/supabase';
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 const AMMAN = { latitude: 31.9539, longitude: 35.9106 };
 
+/** Haversine great-circle distance in kilometres. */
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLng = (lng2 - lng1) * (Math.PI / 180);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+    Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 type TripStatus = 'accepted' | 'en_route' | 'arrived' | 'in_progress' | 'completed' | 'cancelled';
 
 interface TripOffer {
@@ -159,6 +171,14 @@ export default function DashboardScreen() {
 
         if (trip) {
           Vibration.vibrate(Platform.OS === 'android' ? [0, 400, 200, 400] : 400);
+
+          // Compute real trip distance from stored coordinates.
+          const distKm =
+            trip.pickup_lat != null && trip.pickup_lng != null &&
+            trip.dropoff_lat != null && trip.dropoff_lng != null
+              ? haversineKm(trip.pickup_lat, trip.pickup_lng, trip.dropoff_lat, trip.dropoff_lng)
+              : null;
+
           setOffer({
             id: offerData.id,
             trip_id: offerData.trip_id,
@@ -167,7 +187,7 @@ export default function DashboardScreen() {
             pickup_lat: trip.pickup_lat ?? 0,
             pickup_lng: trip.pickup_lng ?? 0,
             fare_estimate: trip.fare_amount ? `${trip.fare_amount} JD` : '~2-5 JD',
-            distance_km: '—',
+            distance_km: distKm != null ? distKm.toFixed(1) : '—',
           });
           setOfferTimer(15);
         }

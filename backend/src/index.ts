@@ -18,7 +18,11 @@ app.use(helmet());
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
   : (() => {
-      console.warn('[SECURITY] ALLOWED_ORIGINS is not set — CORS is open to all origins (*). Set this variable in production.');
+      if (process.env.NODE_ENV === 'production') {
+        console.error('[SECURITY] ALLOWED_ORIGINS is not set in production — CORS is open to all origins. Set this variable immediately.');
+      } else {
+        console.warn('[SECURITY] ALLOWED_ORIGINS is not set — CORS is open to all origins (*). Set this variable in production.');
+      }
       return '*';
     })();
 
@@ -45,27 +49,77 @@ export const otpLimiter = rateLimit({
 });
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok' });
+  res.json({ status: 'ok', waitlistMode: process.env.WAITLIST_MODE === 'true' });
 });
+
+// ----------------------------------------------------------------
+// P3: Backend waitlist-mode enforcement
+//
+// When WAITLIST_MODE=true the backend accepts only health and
+// waitlist-signup requests.  All authenticated operational endpoints
+// (auth, trips, drivers, riders, explore) return 503 so mobile
+// clients that bypass the frontend gate still cannot use the API.
+//
+// Allowed in waitlist mode:
+//   GET  /health
+//   GET  /api/waitlist/count
+//   POST /api/waitlist
+//
+// Blocked (503) in waitlist mode:
+//   /api/auth/*  /api/trips/*  /api/drivers/*  /api/riders/*  /api/explore/*
+// ----------------------------------------------------------------
+const WAITLIST_MODE = process.env.WAITLIST_MODE === 'true';
+
+if (WAITLIST_MODE) {
+  console.log('[waitlist] WAITLIST_MODE=true — operational endpoints blocked');
+  app.use(
+    ['/api/auth', '/api/trips', '/api/drivers', '/api/riders', '/api/explore'],
+    (_req, res) => {
+      res.status(503).json({
+        error: 'Wasel has not launched yet. Join the waitlist at /api/waitlist.',
+      });
+    },
+  );
+}
 
 // Routes
 import waitlistRouter from './routes/waitlist';
-import authRouter from './routes/auth';
-import tripsRouter from './routes/trips';
-import driversRouter from './routes/drivers';
-import ridersRouter from './routes/riders';
-import exploreRouter from './routes/explore';
+import authRouter     from './routes/auth';
+import tripsRouter    from './routes/trips';
+import driversRouter  from './routes/drivers';
+import ridersRouter   from './routes/riders';
+import exploreRouter  from './routes/explore';
 
 app.use('/api/waitlist', waitlistRouter);
-app.use('/api/auth', authRouter);
-app.use('/api/trips', tripsRouter);
+app.use('/api/auth',    authRouter);
+app.use('/api/trips',   tripsRouter);
 app.use('/api/drivers', driversRouter);
-app.use('/api/riders', ridersRouter);
+app.use('/api/riders',  ridersRouter);
 app.use('/api/explore', exploreRouter);
+
+// ----------------------------------------------------------------
+// P6: Start the DB-based dispatch poller.
+//
+// The poller replaces the in-memory setTimeout recursion that was
+// previously inside dispatchTrip(). Expired pending offers are now
+// detected by a polling query every POLLER_INTERVAL_MS (5 s) and
+// re-dispatched from here.  Because all state lives in the database,
+// this approach survives process restarts and is safe to run on
+// multiple instances (optimistic concurrency on the offer row
+// prevents double-dispatch).
+// ----------------------------------------------------------------
+import { startDispatchPoller } from './dispatch/engine';
 
 app.listen(PORT, () => {
   console.log(`Wasel backend running on port ${PORT}`);
-  console.log(`Waitlist mode: ${process.env.WAITLIST_MODE === 'true'}`);
+  console.log(`Waitlist mode: ${WAITLIST_MODE}`);
+  console.log(`Environment: ${process.env.NODE_ENV ?? 'unset'}`);
+
+  // Start the durable dispatch poller (only in non-waitlist mode)
+  if (!WAITLIST_MODE) {
+    startDispatchPoller();
+    console.log('[dispatch] Poller started (interval: 5s)');
+  }
 });
 
 export default app;

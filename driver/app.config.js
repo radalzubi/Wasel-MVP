@@ -1,0 +1,59 @@
+// Dynamic Expo config — replaces app.json so secrets can be injected
+// via environment variables instead of being committed to source control.
+//
+// See rider/app.config.js for full documentation on the setup pattern.
+//
+// IMPORTANT: The key that was previously hardcoded in app.json
+// (<GOOGLE_MAPS_API_KEY>) is now in the git history
+// and must be rotated in Google Cloud Console. The new key should only
+// exist in .env (gitignored) and EAS secrets.
+
+/** @type {import('@expo/config').ConfigContext} */
+module.exports = ({ config }) => ({
+  ...config,
+  name:             'Wasel Driver',
+  slug:             'wasel-driver',
+  version:          '1.0.0',
+  scheme:           'wasel-driver',
+  orientation:      'portrait',
+  icon:             './assets/icon.png',
+  userInterfaceStyle: 'dark',
+  newArchEnabled:   false,
+  splash: {
+    image:           './assets/splash-icon.png',
+    resizeMode:      'contain',
+    backgroundColor: '#0A0A0A',
+  },
+  ios: {
+    bundleIdentifier: 'com.wasel.driver',
+    supportsTablet:   false,
+    config: {
+      googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY,
+    },
+  },
+  android: {
+    package: 'com.wasel.driver',
+    adaptiveIcon: {
+      foregroundImage: './assets/adaptive-icon.png',
+      backgroundColor: '#0A0A0A',
+    },
+    config: {
+      googleMaps: {
+        apiKey: process.env.GOOGLE_MAPS_API_KEY,
+      },
+    },
+  },
+  plugins: [
+    'expo-router',
+    [
+      'expo-location',
+      {
+        locationAlwaysAndWhenInUsePermission: 'Wasel needs your location to show you nearby trips.',
+        locationWhenInUsePermission:          'Wasel needs your location to show you nearby trips.',
+      },
+    ],
+  ],
+  experiments: {
+    typedRoutes: true,
+  },
+});

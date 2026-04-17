@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  Alert, ScrollView, Platform,
+  Alert, ScrollView, Platform, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -211,34 +211,10 @@ export default function ProfileScreen() {
         <Text style={styles.sectionHeader}>ACCOUNT</Text>
         <View style={styles.section}>
           <SettingsRow
-            icon="person-outline"
-            label="Display name"
-            value={user?.user_metadata?.full_name || 'Not set'}
-            chevron
-            onPress={() => Alert.alert('Display Name', 'Coming soon')}
-          />
-          <View style={styles.rowDivider} />
-          <SettingsRow
             icon="call-outline"
             label="Phone number"
             value={displayPhone ? formatPhone(displayPhone) : '—'}
           />
-        </View>
-
-        {/* ── TRAVEL ── */}
-        <Text style={styles.sectionHeader}>TRAVEL</Text>
-        <View style={styles.section}>
-          <SettingsRow
-            icon="bookmark-outline"
-            label="Saved places"
-            chevron
-            onPress={() => Alert.alert('Saved Places', 'Saved places coming soon')}
-          >
-            <View style={styles.chipsRow}>
-              <View style={styles.chip}><Text style={styles.chipText}>Home</Text></View>
-              <View style={styles.chip}><Text style={styles.chipText}>Work</Text></View>
-            </View>
-          </SettingsRow>
         </View>
 
         {/* ── PAYMENTS ── */}
@@ -246,34 +222,14 @@ export default function ProfileScreen() {
         <View style={styles.section}>
           <SettingsRow
             icon="card-outline"
-            label="Payment methods"
-            value="Cash"
-            chevron
-            onPress={() => Alert.alert('Payment Methods', 'Card payments coming soon')}
-          />
-        </View>
-
-        {/* ── TRIPS ── */}
-        <Text style={styles.sectionHeader}>TRIPS</Text>
-        <View style={styles.section}>
-          <SettingsRow
-            icon="time-outline"
-            label="Trip history"
-            chevron
-            onPress={() => Alert.alert('Trip History', 'Trip history coming soon')}
+            label="Payment method"
+            value="Cash only"
           />
         </View>
 
         {/* ── PREFERENCES ── */}
         <Text style={styles.sectionHeader}>PREFERENCES</Text>
         <View style={styles.section}>
-          <SettingsRow
-            icon="notifications-outline"
-            label="Notifications"
-            chevron
-            onPress={() => Alert.alert('Notifications', 'Notification settings coming soon')}
-          />
-          <View style={styles.rowDivider} />
           <SettingsRow
             icon="language-outline"
             label="Language"
@@ -287,28 +243,10 @@ export default function ProfileScreen() {
         <Text style={styles.sectionHeader}>HELP & SUPPORT</Text>
         <View style={styles.section}>
           <SettingsRow
-            icon="help-circle-outline"
-            label="FAQ"
-            chevron
-            onPress={() => Alert.alert('FAQ', 'FAQ coming soon')}
-          />
-          <View style={styles.rowDivider} />
-          <SettingsRow
             icon="chatbubble-outline"
             label="Contact support"
             chevron
-            onPress={() => Alert.alert('Contact Support', 'Opens email/chat: support@wasel.jo')}
-          />
-        </View>
-
-        {/* ── SAFETY ── */}
-        <Text style={styles.sectionHeader}>SAFETY</Text>
-        <View style={styles.section}>
-          <SettingsRow
-            icon="shield-outline"
-            label="Emergency contact"
-            chevron
-            onPress={() => Alert.alert('Emergency Contact', 'Emergency contact coming soon')}
+            onPress={() => Linking.openURL('mailto:support@wasel.jo')}
           />
         </View>
 
@@ -529,25 +467,6 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#1A1A1A',
     marginLeft: 52,
-  },
-
-  // ── Chips (Saved Places) ──
-  chipsRow: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  chip: {
-    backgroundColor: '#1E1E1E',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderWidth: 1,
-    borderColor: '#2A2A2A',
-  },
-  chipText: {
-    fontSize: 11,
-    color: '#888',
-    fontWeight: '500',
   },
 
   // ── About row ──
