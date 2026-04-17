@@ -7,11 +7,37 @@ export default function DriverWaitlistSuccess() {
     <SafeAreaView style={styles.container}>
       <View style={styles.inner}>
         <Text style={styles.emoji}>🚗</Text>
+
         <Text style={styles.title}>You're on the list!</Text>
         <Text style={styles.subtitle}>
-          We'll reach out when driver onboarding opens in your city.{'\n\n'}
-          In the meantime, tell other drivers — the more who sign up, the faster we launch.
+          We'll reach out when driver onboarding opens in your city.
         </Text>
+
+        {/* Model reminder */}
+        <View style={styles.modelCard}>
+          <Text style={styles.modelCardTitle}>A quick reminder of how Wasel works</Text>
+
+          <View style={styles.modelRow}>
+            <Text style={styles.modelRowIcon}>✕</Text>
+            <View style={styles.modelRowText}>
+              <Text style={styles.modelRowLabel}>Traditional platforms</Text>
+              <Text style={styles.modelRowDesc}>Take 20–30% of every fare you earn</Text>
+            </View>
+          </View>
+
+          <View style={styles.modelDivider} />
+
+          <View style={styles.modelRow}>
+            <Text style={[styles.modelRowIcon, styles.modelRowIconGold]}>✓</Text>
+            <View style={styles.modelRowText}>
+              <Text style={[styles.modelRowLabel, styles.modelRowLabelGold]}>Wasel</Text>
+              <Text style={styles.modelRowDesc}>
+                Flat monthly subscription (20–50 JD). Every fare is 100% yours.
+              </Text>
+            </View>
+          </View>
+        </View>
+
         <View style={styles.badge}>
           <Text style={styles.badgeText}>وصل  ·  Wasel Driver</Text>
         </View>
@@ -22,17 +48,37 @@ export default function DriverWaitlistSuccess() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0A0A0A' },
-  inner: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
-  emoji: { fontSize: 72, marginBottom: 28 },
-  title: { fontSize: 30, fontWeight: '700', color: '#FFF', marginBottom: 16, textAlign: 'center' },
-  subtitle: { fontSize: 16, color: '#777', textAlign: 'center', lineHeight: 26 },
-  badge: {
-    marginTop: 48,
+  inner: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 28 },
+  emoji: { fontSize: 64, marginBottom: 24 },
+  title: { fontSize: 28, fontWeight: '700', color: '#FFF', marginBottom: 10, textAlign: 'center' },
+  subtitle: { fontSize: 15, color: '#666', textAlign: 'center', lineHeight: 24, marginBottom: 36 },
+
+  modelCard: {
+    backgroundColor: '#111',
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: '#2A2A2A',
-    borderRadius: 100,
-    paddingHorizontal: 20,
-    paddingVertical: 8,
+    padding: 18,
+    width: '100%',
+    marginBottom: 40,
+  },
+  modelCardTitle: {
+    fontSize: 12, color: '#555', fontWeight: '600',
+    textTransform: 'uppercase', letterSpacing: 0.8,
+    marginBottom: 16,
+  },
+  modelRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 14 },
+  modelRowIcon: { fontSize: 18, color: '#FF3B30', marginTop: 1, width: 20, textAlign: 'center' },
+  modelRowIconGold: { color: '#F5A623' },
+  modelRowText: { flex: 1 },
+  modelRowLabel: { fontSize: 14, fontWeight: '700', color: '#FFF', marginBottom: 3 },
+  modelRowLabelGold: { color: '#F5A623' },
+  modelRowDesc: { fontSize: 13, color: '#666', lineHeight: 20 },
+  modelDivider: { height: 1, backgroundColor: '#1E1E1E', marginVertical: 14 },
+
+  badge: {
+    borderWidth: 1, borderColor: '#2A2A2A', borderRadius: 100,
+    paddingHorizontal: 20, paddingVertical: 8,
   },
   badgeText: { color: '#F5A623', fontSize: 14, fontWeight: '600', letterSpacing: 2 },
 });

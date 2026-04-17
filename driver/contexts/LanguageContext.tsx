@@ -130,6 +130,36 @@ const translations: Record<string, Record<Language, string>> = {
     en: 'You joined before Wasel launched — exclusive benefits coming soon',
     ar: 'انضممت قبل إطلاق وصل — مزايا حصرية قادمة قريباً',
   },
+
+  // Business model
+  modelHeadline: { en: 'Drive with Wasel. Keep every fare.', ar: 'اقد مع وصل. احتفظ بكل أجرة.' },
+  modelSubtitle: {
+    en: 'Traditional platforms take 20–30% of every ride. Wasel charges a flat monthly subscription — after that, every fare you earn is entirely yours.',
+    ar: 'تأخذ المنصات التقليدية 20–30٪ من كل رحلة. وصل يفرض اشتراكاً شهرياً ثابتاً — بعد ذلك، كل أجرة تكسبها هي لك تماماً.',
+  },
+  perMonth: { en: '/mo', ar: '/شهر' },
+  tierSilverDesc: { en: 'Standard dispatch priority', ar: 'أولوية توزيع عادية' },
+  tierGoldDesc: { en: 'Higher dispatch score · More trips offered first', ar: 'درجة توزيع أعلى · المزيد من الرحلات أولاً' },
+  tierPlatinumDesc: { en: 'Maximum priority · First in every dispatch queue', ar: 'أولوية قصوى · الأول في كل قائمة توزيع' },
+  tierStartNote: { en: 'All drivers start on Silver. Move up as you build your track record.', ar: 'جميع السائقين يبدأون بالفضي. ارتقِ مع بناء سجلك.' },
+  chooseTier: { en: 'Choose your tier at onboarding', ar: 'اختر مستواك عند التسجيل' },
+
+  // Profile tier pricing
+  monthlyFee: { en: 'Monthly fee', ar: 'الرسوم الشهرية' },
+  keepsFare: { en: 'You keep 100% of every fare', ar: 'تحتفظ بـ 100٪ من كل أجرة' },
+  dispatchWeight: { en: 'Dispatch weight', ar: 'وزن التوزيع' },
+  upgradePrompt: { en: 'Upgrade your tier', ar: 'ارفع مستواك' },
+  upgradeDesc: {
+    en: 'Higher tier = more trips offered to you first. The subscription pays for itself with extra volume.',
+    ar: 'مستوى أعلى = المزيد من الرحلات تُعرض عليك أولاً. يدفع الاشتراك لنفسه من خلال الحجم الإضافي.',
+  },
+  upgradeTo: { en: 'Upgrade to', ar: 'الترقية إلى' },
+  forPerMonth: { en: 'for', ar: 'مقابل' },
+
+  // Dashboard reinforcement
+  fareIsYours: { en: 'Every fare goes directly to you', ar: 'كل أجرة تذهب مباشرة إليك' },
+  todayEarnings: { en: 'Today', ar: 'اليوم' },
+  todayTrips: { en: 'Trips', ar: 'الرحلات' },
 };
 
 const LanguageContext = createContext<LanguageContextType>({

@@ -26,12 +26,14 @@ interface TripOffer {
 
 interface LatLng { latitude: number; longitude: number; }
 
+const TIER_META: Record<number, { label: string; price: number; color: string; text: string }> = {
+  1: { label: 'Silver 🥈', price: 20, color: '#2A2A2A', text: '#AAA' },
+  2: { label: 'Gold 🥇',   price: 35, color: '#F5A623', text: '#000' },
+  3: { label: 'Platinum 💎', price: 50, color: '#8B5CF6', text: '#FFF' },
+};
+
 function getTierBadge(tier: number) {
-  switch (tier) {
-    case 2: return { label: 'Gold ⭐', color: '#F5A623', text: '#000' };
-    case 3: return { label: 'Platinum 💎', color: '#8B5CF6', text: '#FFF' };
-    default: return { label: 'Silver', color: '#2A2A2A', text: '#AAA' };
-  }
+  return TIER_META[tier] ?? TIER_META[1];
 }
 
 export default function DashboardScreen() {
@@ -318,7 +320,9 @@ export default function DashboardScreen() {
               وصل <Text style={styles.driverBadge}>Driver</Text>
             </Text>
             <View style={[styles.tierBadge, { backgroundColor: tierBadge.color }]}>
-              <Text style={[styles.tierBadgeText, { color: tierBadge.text }]}>{tierBadge.label}</Text>
+              <Text style={[styles.tierBadgeText, { color: tierBadge.text }]}>
+                {tierBadge.label} · {tierBadge.price} JD/mo
+              </Text>
             </View>
           </View>
         </View>
@@ -344,8 +348,15 @@ export default function DashboardScreen() {
             {isOnline && (
               <View style={styles.waitingRow}>
                 <Text style={styles.waitingText}>{t('waitingForTrips')}</Text>
+                <View style={styles.fareIsYoursRow}>
+                  <Text style={styles.fareIsYoursText}>💰 {t('fareIsYours')}</Text>
+                </View>
                 <View style={styles.earningsRow}>
-                  <Text style={styles.earningsText}>Today: 0 JD · Trips: 0</Text>
+                  <Text style={styles.earningsLabel}>{t('todayEarnings')}</Text>
+                  <Text style={styles.earningsValue}>0 JD</Text>
+                  <View style={styles.earningsSep} />
+                  <Text style={styles.earningsLabel}>{t('todayTrips')}</Text>
+                  <Text style={styles.earningsValue}>0</Text>
                 </View>
               </View>
             )}
@@ -450,10 +461,23 @@ const styles = StyleSheet.create({
   onlineRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   onlineLabel: { fontSize: 18, fontWeight: '700', color: '#FFF', marginBottom: 4 },
   onlineSub: { fontSize: 13, color: '#666' },
-  waitingRow: { marginTop: 16, alignItems: 'center' },
+  waitingRow: { marginTop: 16, alignItems: 'center', gap: 10 },
   waitingText: { color: '#444', fontSize: 14 },
-  earningsRow: { marginTop: 8 },
-  earningsText: { color: '#333', fontSize: 12, fontWeight: '500' },
+  fareIsYoursRow: {
+    backgroundColor: 'rgba(245,166,35,0.07)',
+    borderRadius: 8, borderWidth: 1, borderColor: 'rgba(245,166,35,0.2)',
+    paddingHorizontal: 14, paddingVertical: 6,
+  },
+  fareIsYoursText: { color: '#F5A623', fontSize: 12, fontWeight: '600' },
+  earningsRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#161616', borderRadius: 8,
+    paddingHorizontal: 14, paddingVertical: 7,
+    borderWidth: 1, borderColor: '#2A2A2A',
+  },
+  earningsLabel: { fontSize: 12, color: '#555' },
+  earningsValue: { fontSize: 13, fontWeight: '700', color: '#FFF' },
+  earningsSep: { width: 1, height: 12, backgroundColor: '#2A2A2A', marginHorizontal: 4 },
   tripActiveLabel: { fontSize: 18, fontWeight: '700', color: '#FFF', marginBottom: 16 },
   tripActionButton: {
     backgroundColor: '#F5A623', borderRadius: 14,

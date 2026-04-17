@@ -25,36 +25,29 @@ interface DriverProfile {
   waitlist_position: number | null;
 }
 
+const TIER_DATA = {
+  1: {
+    emoji: '🥈', nameKey: 'silver', descKey: 'tierSilverDesc',
+    price: 20, weight: 40,
+    borderColor: '#3A3A3A', badgeColor: '#2A2A2A', badgeText: '#AAA', accentColor: '#888',
+    next: 2 as const,
+  },
+  2: {
+    emoji: '🥇', nameKey: 'gold', descKey: 'tierGoldDesc',
+    price: 35, weight: 70,
+    borderColor: '#F5A623', badgeColor: '#F5A623', badgeText: '#000', accentColor: '#F5A623',
+    next: 3 as const,
+  },
+  3: {
+    emoji: '💎', nameKey: 'platinum', descKey: 'tierPlatinumDesc',
+    price: 50, weight: 100,
+    borderColor: '#8B5CF6', badgeColor: '#8B5CF6', badgeText: '#FFF', accentColor: '#8B5CF6',
+    next: null,
+  },
+} as const;
+
 function getTierInfo(tier: number) {
-  switch (tier) {
-    case 2:
-      return {
-        emoji: '🥇',
-        nameKey: 'gold',
-        description: 'Enhanced dispatch priority · 30% higher dispatch score',
-        borderColor: '#F5A623',
-        badgeColor: '#F5A623',
-        badgeText: '#000',
-      };
-    case 3:
-      return {
-        emoji: '💎',
-        nameKey: 'platinum',
-        description: 'Maximum priority · First in every dispatch queue',
-        borderColor: '#8B5CF6',
-        badgeColor: '#8B5CF6',
-        badgeText: '#FFF',
-      };
-    default:
-      return {
-        emoji: '🥈',
-        nameKey: 'silver',
-        description: 'Base access · Standard dispatch priority',
-        borderColor: '#555',
-        badgeColor: '#2A2A2A',
-        badgeText: '#AAA',
-      };
-  }
+  return TIER_DATA[(tier as 1 | 2 | 3)] ?? TIER_DATA[1];
 }
 
 function formatDriverSince(isoDate: string): string {
@@ -162,6 +155,7 @@ export default function ProfileScreen() {
 
         {/* Subscription Tier Card */}
         <View style={[styles.tierCard, { borderColor: tierInfo.borderColor }]}>
+          {/* Header row */}
           <View style={styles.tierHeader}>
             <Text style={styles.tierSectionLabel}>{t('subscriptionTier')}</Text>
             <View style={[styles.tierBadge, { backgroundColor: tierInfo.badgeColor }]}>
@@ -170,9 +164,51 @@ export default function ProfileScreen() {
               </Text>
             </View>
           </View>
-          <Text style={styles.tierDescription}>{tierInfo.description}</Text>
+
+          {/* Price + keep-all-fares */}
+          <View style={styles.tierPriceRow}>
+            <Text style={[styles.tierPriceAmount, { color: tierInfo.accentColor }]}>
+              {tierInfo.price} JD
+            </Text>
+            <Text style={styles.tierPriceUnit}> / month</Text>
+            <View style={styles.tierPriceSep} />
+            <Text style={styles.tierKeepFare}>💰 {t('keepsFare')}</Text>
+          </View>
+
+          {/* Dispatch weight bar */}
+          <View style={styles.tierWeightRow}>
+            <Text style={styles.tierWeightLabel}>{t('dispatchWeight')}</Text>
+            <View style={styles.tierWeightTrack}>
+              <View style={[
+                styles.tierWeightFill,
+                { width: `${tierInfo.weight}%` as any, backgroundColor: tierInfo.accentColor },
+              ]} />
+            </View>
+            <Text style={[styles.tierWeightPct, { color: tierInfo.accentColor }]}>
+              {tierInfo.weight}%
+            </Text>
+          </View>
+
           <View style={styles.tierDivider} />
           <Text style={styles.tierNote}>{t('dispatchPriorityNote')}</Text>
+
+          {/* Upgrade CTA (hidden for Platinum) */}
+          {tierInfo.next && (() => {
+            const next = TIER_DATA[tierInfo.next];
+            return (
+              <View style={styles.upgradeBox}>
+                <View style={styles.upgradeBoxTop}>
+                  <Text style={styles.upgradeBoxTitle}>
+                    {t('upgradeTo')} {next.emoji} {t(next.nameKey)}
+                  </Text>
+                  <Text style={[styles.upgradeBoxPrice, { color: next.accentColor }]}>
+                    {next.price} JD/mo
+                  </Text>
+                </View>
+                <Text style={styles.upgradeBoxDesc}>{t('upgradeDesc')}</Text>
+              </View>
+            );
+          })()}
         </View>
 
         {/* Vehicle Card */}
@@ -301,15 +337,47 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     borderWidth: 1.5,
   },
-  tierHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  tierSectionLabel: { fontSize: 13, color: '#666', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8 },
-  tierBadge: {
-    borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5,
+  tierHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12,
   },
+  tierSectionLabel: {
+    fontSize: 11, color: '#555', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1,
+  },
+  tierBadge: { borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5 },
   tierBadgeText: { fontSize: 13, fontWeight: '700' },
-  tierDescription: { fontSize: 15, color: '#CCC', lineHeight: 22, marginBottom: 12 },
+
+  // Price row
+  tierPriceRow: {
+    flexDirection: 'row', alignItems: 'baseline', marginBottom: 14, flexWrap: 'wrap', gap: 4,
+  },
+  tierPriceAmount: { fontSize: 28, fontWeight: '800' },
+  tierPriceUnit: { fontSize: 14, color: '#666' },
+  tierPriceSep: { width: 1, height: 16, backgroundColor: '#2A2A2A', marginHorizontal: 8, alignSelf: 'center' },
+  tierKeepFare: { fontSize: 12, color: '#888' },
+
+  // Weight bar
+  tierWeightRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 },
+  tierWeightLabel: { fontSize: 11, color: '#555', width: 110 },
+  tierWeightTrack: { flex: 1, height: 5, backgroundColor: '#1E1E1E', borderRadius: 3, overflow: 'hidden' },
+  tierWeightFill: { height: 5, borderRadius: 3 },
+  tierWeightPct: { fontSize: 12, fontWeight: '700', width: 38, textAlign: 'right' },
+
   tierDivider: { height: 1, backgroundColor: '#1E1E1E', marginBottom: 12 },
-  tierNote: { fontSize: 12, color: '#555', lineHeight: 18 },
+  tierNote: { fontSize: 12, color: '#555', lineHeight: 18, marginBottom: 0 },
+
+  // Upgrade box
+  upgradeBox: {
+    marginTop: 14,
+    backgroundColor: '#0D0D0D',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+    padding: 12,
+  },
+  upgradeBoxTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  upgradeBoxTitle: { fontSize: 13, fontWeight: '700', color: '#CCC' },
+  upgradeBoxPrice: { fontSize: 14, fontWeight: '800' },
+  upgradeBoxDesc: { fontSize: 12, color: '#666', lineHeight: 18 },
 
   // Vehicle
   cardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 },
