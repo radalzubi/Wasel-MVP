@@ -1,11 +1,15 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Alert, I18nManager } from 'react-native';
+import {
+  Alert, I18nManager, Modal, StyleSheet,
+  Text, TouchableOpacity, View,
+} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type Language = 'en' | 'ar';
 
 interface LanguageContextType {
   language: Language;
+  /** Opens the language-selection modal. */
   toggleLanguage: () => void;
   t: (key: string) => string;
   isRTL: boolean;
@@ -26,12 +30,12 @@ const translations: Record<string, Record<Language, string>> = {
   resendCode: { en: 'Resend code', ar: 'إعادة إرسال الرمز' },
   resendIn: { en: 'Resend code in', ar: 'إعادة الإرسال خلال' },
   seconds: { en: 's', ar: 'ث' },
-  back: { en: '← Back', ar: 'رجوع →' },
+  back: { en: 'Back', ar: 'رجوع' },
 
   // Home
   whereTo: { en: 'Where to?', ar: 'إلى أين؟' },
   setPickup: { en: 'Set pickup location', ar: 'حدد موقع الانطلاق' },
-  tapMapDest: { en: 'Tap map to set destination', ar: 'اضغط على الخريطة لتحديد الوجهة' },
+  tapMapDest: { en: 'Search destination...', ar: 'ابحث عن الوجهة...' },
   estimatedFare: { en: 'Estimated fare', ar: 'الأجرة التقديرية' },
   cashPayment: { en: 'Cash payment', ar: 'دفع نقدي' },
   requestWasel: { en: 'Request Wasel', ar: 'اطلب وصل' },
@@ -42,11 +46,11 @@ const translations: Record<string, Record<Language, string>> = {
   // Trip status
   findingDrivers: { en: 'Finding drivers...', ar: 'جاري البحث عن سائقين...' },
   contactingDriver: { en: 'Contacting driver...', ar: 'جاري التواصل مع السائق...' },
-  driverAccepted: { en: 'Driver accepted!', ar: 'قبل السائق الرحلة!' },
+  driverAccepted: { en: 'Driver Accepted', ar: 'قبل السائق الرحلة' },
   driverOnWay: { en: 'Driver on the way', ar: 'السائق في الطريق' },
-  driverArrived: { en: 'Driver has arrived', ar: 'وصل السائق' },
-  tripInProgress: { en: 'Trip in progress', ar: 'الرحلة جارية' },
-  tripComplete: { en: 'Trip complete! 🎉', ar: '!اكتملت الرحلة 🎉' },
+  driverArrived: { en: 'Driver Arrived', ar: 'وصل السائق' },
+  tripInProgress: { en: 'Trip in Progress', ar: 'الرحلة جارية' },
+  tripComplete: { en: 'Trip Complete', ar: 'اكتملت الرحلة' },
 
   // Explore
   exploreAmman: { en: 'Explore Amman', ar: 'استكشف عمّان' },
@@ -84,8 +88,8 @@ const translations: Record<string, Record<Language, string>> = {
   keepEarnings: { en: 'You keep earnings', ar: 'أرباحك لك' },
 
   // Driver Dashboard
-  online: { en: '🟢 Online', ar: '🟢 متصل' },
-  offline: { en: '⚫ Offline', ar: '⚫ غير متصل' },
+  online: { en: 'Online', ar: 'متصل' },
+  offline: { en: 'Offline', ar: 'غير متصل' },
   acceptingTrips: { en: 'Accepting trips', ar: 'قبول الرحلات' },
   goOnlineMsg: { en: 'Go online to receive trips', ar: 'اتصل لاستقبال الرحلات' },
   waitingForTrips: { en: 'Waiting for trips...', ar: 'في انتظار الرحلات...' },
@@ -100,10 +104,7 @@ const translations: Record<string, Record<Language, string>> = {
   completeTrip: { en: 'Complete Trip', ar: 'أنهِ الرحلة' },
   driverApproval: { en: 'Driver accounts are subject to approval', ar: 'حسابات السائقين خاضعة للموافقة' },
   drivingToPickup: { en: 'Driving to Pickup', ar: 'في الطريق لموقع الانطلاق' },
-  driverAccepted: { en: 'Driver Accepted', ar: 'قبل السائق الرحلة' },
-  driverArrived: { en: 'Driver Arrived', ar: 'وصل السائق' },
-  tripInProgress: { en: 'Trip in Progress', ar: 'الرحلة جارية' },
-  tripComplete: { en: 'Trip Complete', ar: 'اكتملت الرحلة' },
+  tripComplete2: { en: 'Trip Complete', ar: 'اكتملت الرحلة' },
 
   // General
   earlyMember: { en: 'Early Member', ar: 'عضو مبكر' },
@@ -180,27 +181,32 @@ const STORAGE_KEY = '@wasel_language';
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [language, setLanguage] = useState<Language>('en');
+  const [selectorVisible, setSelectorVisible] = useState(false);
 
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY).then((stored) => {
-      if (stored === 'ar' || stored === 'en') {
-        setLanguage(stored);
-      }
+      if (stored === 'ar' || stored === 'en') setLanguage(stored);
     }).catch(() => {});
   }, []);
 
+  // Opens the modal instead of auto-toggling
   function toggleLanguage() {
-    const next: Language = language === 'en' ? 'ar' : 'en';
-    const nextRTL = next === 'ar';
+    setSelectorVisible(true);
+  }
 
-    AsyncStorage.setItem(STORAGE_KEY, next).catch(() => {});
-    setLanguage(next);
+  function handleSelect(lang: Language) {
+    setSelectorVisible(false);
+    if (lang === language) return;
 
+    AsyncStorage.setItem(STORAGE_KEY, lang).catch(() => {});
+    setLanguage(lang);
+
+    const nextRTL = lang === 'ar';
     if (I18nManager.isRTL !== nextRTL) {
       I18nManager.forceRTL(nextRTL);
       Alert.alert(
-        next === 'ar' ? 'مطلوب إعادة تشغيل' : 'Restart Required',
-        next === 'ar'
+        lang === 'ar' ? 'مطلوب إعادة تشغيل' : 'Restart Required',
+        lang === 'ar'
           ? 'يرجى إعادة تشغيل التطبيق لتطبيق اللغة العربية'
           : 'Please restart the app to apply the language change.',
       );
@@ -216,8 +222,113 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   return (
     <LanguageContext.Provider value={{ language, toggleLanguage, t, isRTL: language === 'ar' }}>
       {children}
+
+      {/* Language selector modal — shown by toggleLanguage() */}
+      <Modal
+        visible={selectorVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectorVisible(false)}
+      >
+        <View style={ls.overlay}>
+          <View style={ls.card}>
+            <Text style={ls.title}>
+              {language === 'ar' ? 'اختر اللغة' : 'Select Language'}
+            </Text>
+
+            <TouchableOpacity
+              style={[ls.option, language === 'en' && ls.optionActive]}
+              onPress={() => handleSelect('en')}
+            >
+              <Text style={[ls.optionText, language === 'en' && ls.optionTextActive]}>
+                English
+              </Text>
+              {language === 'en' && <View style={ls.checkDot} />}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[ls.option, language === 'ar' && ls.optionActive]}
+              onPress={() => handleSelect('ar')}
+            >
+              <Text style={[ls.optionText, language === 'ar' && ls.optionTextActive]}>
+                العربية
+              </Text>
+              {language === 'ar' && <View style={ls.checkDot} />}
+            </TouchableOpacity>
+
+            <TouchableOpacity style={ls.cancelRow} onPress={() => setSelectorVisible(false)}>
+              <Text style={ls.cancelText}>
+                {language === 'ar' ? 'إلغاء' : 'Cancel'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </LanguageContext.Provider>
   );
 }
 
 export const useLanguage = () => useContext(LanguageContext);
+
+const ls = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  card: {
+    backgroundColor: '#111',
+    borderRadius: 20,
+    padding: 24,
+    width: 280,
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+  },
+  title: {
+    color: '#FFF',
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  option: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#1A1A1A',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+  },
+  optionActive: {
+    backgroundColor: 'rgba(245,166,35,0.12)',
+    borderColor: '#F5A623',
+  },
+  optionText: {
+    color: '#AAA',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  optionTextActive: {
+    color: '#F5A623',
+  },
+  checkDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#F5A623',
+  },
+  cancelRow: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  cancelText: {
+    color: '#555',
+    fontSize: 15,
+  },
+});

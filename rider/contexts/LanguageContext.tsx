@@ -1,11 +1,15 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Alert, I18nManager } from 'react-native';
+import {
+  Alert, I18nManager, Modal, StyleSheet,
+  Text, TouchableOpacity, View,
+} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type Language = 'en' | 'ar';
 
 interface LanguageContextType {
   language: Language;
+  /** Opens the language-selection modal. */
   toggleLanguage: () => void;
   t: (key: string) => string;
   isRTL: boolean;
@@ -31,7 +35,7 @@ const translations: Record<string, Record<Language, string>> = {
   // Home
   whereTo: { en: 'Where to?', ar: 'إلى أين؟' },
   setPickup: { en: 'Set pickup location', ar: 'حدد موقع الانطلاق' },
-  tapMapDest: { en: 'Tap map to set destination', ar: 'اضغط على الخريطة لتحديد الوجهة' },
+  tapMapDest: { en: 'Search destination...', ar: 'ابحث عن الوجهة...' },
   estimatedFare: { en: 'Estimated fare', ar: 'الأجرة التقديرية' },
   cashPayment: { en: 'Cash payment', ar: 'دفع نقدي' },
   requestWasel: { en: 'Request Wasel', ar: 'اطلب وصل' },
@@ -103,7 +107,7 @@ const translations: Record<string, Record<Language, string>> = {
   // General
   earlyMember: { en: 'Early Member', ar: 'عضو مبكر' },
   setPickupDropoff: { en: 'Set pickup and dropoff', ar: 'حدد نقطة الانطلاق والوجهة' },
-  tapMapDest2: { en: 'Tap the map to set your destination.', ar: 'اضغط على الخريطة لتحديد وجهتك.' },
+  tapMapDest2: { en: 'Search for a destination above.', ar: 'ابحث عن وجهتك أعلاه.' },
 
   // Profile / Settings
   profile: { en: 'Profile', ar: 'الملف الشخصي' },
@@ -156,27 +160,32 @@ const STORAGE_KEY = '@wasel_language';
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [language, setLanguage] = useState<Language>('en');
+  const [selectorVisible, setSelectorVisible] = useState(false);
 
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY).then((stored) => {
-      if (stored === 'ar' || stored === 'en') {
-        setLanguage(stored);
-      }
+      if (stored === 'ar' || stored === 'en') setLanguage(stored);
     }).catch(() => {});
   }, []);
 
+  // Opens the modal instead of auto-toggling
   function toggleLanguage() {
-    const next: Language = language === 'en' ? 'ar' : 'en';
-    const nextRTL = next === 'ar';
+    setSelectorVisible(true);
+  }
 
-    AsyncStorage.setItem(STORAGE_KEY, next).catch(() => {});
-    setLanguage(next);
+  function handleSelect(lang: Language) {
+    setSelectorVisible(false);
+    if (lang === language) return;
 
+    AsyncStorage.setItem(STORAGE_KEY, lang).catch(() => {});
+    setLanguage(lang);
+
+    const nextRTL = lang === 'ar';
     if (I18nManager.isRTL !== nextRTL) {
       I18nManager.forceRTL(nextRTL);
       Alert.alert(
-        next === 'ar' ? 'مطلوب إعادة تشغيل' : 'Restart Required',
-        next === 'ar'
+        lang === 'ar' ? 'مطلوب إعادة تشغيل' : 'Restart Required',
+        lang === 'ar'
           ? 'يرجى إعادة تشغيل التطبيق لتطبيق اللغة العربية'
           : 'Please restart the app to apply the language change.',
       );
@@ -192,8 +201,113 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   return (
     <LanguageContext.Provider value={{ language, toggleLanguage, t, isRTL: language === 'ar' }}>
       {children}
+
+      {/* Language selector modal — shown by toggleLanguage() */}
+      <Modal
+        visible={selectorVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectorVisible(false)}
+      >
+        <View style={ls.overlay}>
+          <View style={ls.card}>
+            <Text style={ls.title}>
+              {language === 'ar' ? 'اختر اللغة' : 'Select Language'}
+            </Text>
+
+            <TouchableOpacity
+              style={[ls.option, language === 'en' && ls.optionActive]}
+              onPress={() => handleSelect('en')}
+            >
+              <Text style={[ls.optionText, language === 'en' && ls.optionTextActive]}>
+                English
+              </Text>
+              {language === 'en' && <View style={ls.checkDot} />}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[ls.option, language === 'ar' && ls.optionActive]}
+              onPress={() => handleSelect('ar')}
+            >
+              <Text style={[ls.optionText, language === 'ar' && ls.optionTextActive]}>
+                العربية
+              </Text>
+              {language === 'ar' && <View style={ls.checkDot} />}
+            </TouchableOpacity>
+
+            <TouchableOpacity style={ls.cancelRow} onPress={() => setSelectorVisible(false)}>
+              <Text style={ls.cancelText}>
+                {language === 'ar' ? 'إلغاء' : 'Cancel'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </LanguageContext.Provider>
   );
 }
 
 export const useLanguage = () => useContext(LanguageContext);
+
+const ls = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  card: {
+    backgroundColor: '#111',
+    borderRadius: 20,
+    padding: 24,
+    width: 280,
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+  },
+  title: {
+    color: '#FFF',
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  option: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#1A1A1A',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+  },
+  optionActive: {
+    backgroundColor: 'rgba(245,166,35,0.12)',
+    borderColor: '#F5A623',
+  },
+  optionText: {
+    color: '#AAA',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  optionTextActive: {
+    color: '#F5A623',
+  },
+  checkDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#F5A623',
+  },
+  cancelRow: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  cancelText: {
+    color: '#555',
+    fontSize: 15,
+  },
+});

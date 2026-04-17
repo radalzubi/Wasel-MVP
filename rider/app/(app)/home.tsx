@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity,
-  ActivityIndicator, Alert, Keyboard, Animated,
+  View, Text, StyleSheet, TouchableOpacity, TextInput,
+  ActivityIndicator, Alert, Keyboard, FlatList, Platform,
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
@@ -13,84 +13,125 @@ import { supabase } from '../../lib/supabase';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
-// Amman default center
+// Amman city centre — default for users outside Jordan or without GPS
 const AMMAN = { latitude: 31.9539, longitude: 35.9106 };
 
-type TripStatus = 'idle' | 'searching' | 'dispatching' | 'accepted' | 'en_route' | 'arrived' | 'in_progress' | 'completed' | 'cancelled';
+// Jordan bounding box.  Locations outside this range are assumed to be
+// testing from abroad; we fall back to Amman so ordering still works.
+const JORDAN = { minLat: 29.1, maxLat: 33.4, minLng: 34.9, maxLng: 39.3 };
+function inJordan(lat: number, lng: number) {
+  return lat >= JORDAN.minLat && lat <= JORDAN.maxLat &&
+         lng >= JORDAN.minLng && lng <= JORDAN.maxLng;
+}
+
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+type TripStatus =
+  | 'idle' | 'searching' | 'dispatching'
+  | 'accepted' | 'en_route' | 'arrived'
+  | 'in_progress' | 'completed' | 'cancelled';
 
 interface LatLng { latitude: number; longitude: number; }
 
-interface RiderProfile {
-  is_waitlist_member?: boolean;
+interface PlaceSuggestion {
+  place_id: string;
+  display_name: string;
+  lat: string;
+  lon: string;
 }
+
+interface RiderProfile { is_waitlist_member?: boolean; }
 
 export default function HomeScreen() {
   const { user } = useAuth();
   const { t } = useLanguage();
   const mapRef = useRef<MapView>(null);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Location / coordinates
   const [location, setLocation] = useState<LatLng | null>(null);
   const [pickup, setPickup] = useState('');
   const [dropoff, setDropoff] = useState('');
   const [pickupCoords, setPickupCoords] = useState<LatLng | null>(null);
   const [dropoffCoords, setDropoffCoords] = useState<LatLng | null>(null);
+
+  // Trip state
   const [tripStatus, setTripStatus] = useState<TripStatus>('idle');
   const [tripId, setTripId] = useState<string | null>(null);
+  const [driverId, setDriverId] = useState<string | null>(null);
   const [driverLocation, setDriverLocation] = useState<LatLng | null>(null);
-  const [activeInput, setActiveInput] = useState<'pickup' | 'dropoff' | null>(null);
   const [fare, setFare] = useState<string | null>(null);
+
+  // Search UI
+  const [isSearchActive, setIsSearchActive] = useState(false);
+  const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+
+  // Profile
   const [riderProfile, setRiderProfile] = useState<RiderProfile | null>(null);
 
-  // Animation refs
-  const sheetAnim = useRef(new Animated.Value(0)).current; // 0 = booking, 1 = active trip
-  const fareAnim = useRef(new Animated.Value(0)).current;  // 0 = hidden, 1 = visible
-
-  // Get user location on mount
+  // ── Get user location on mount ──────────────────────────────────────────
   useEffect(() => {
     (async () => {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') return;
+        if (status !== 'granted') {
+          defaultToAmman();
+          return;
+        }
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const { latitude, longitude } = loc.coords;
 
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-        const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
-        setLocation(coords);
-        setPickupCoords(coords);
-        setPickup(t('currentLocation'));
-
-        mapRef.current?.animateToRegion({ ...coords, latitudeDelta: 0.01, longitudeDelta: 0.01 }, 800);
+        if (inJordan(latitude, longitude)) {
+          const coords = { latitude, longitude };
+          setLocation(coords);
+          setPickupCoords(coords);
+          setPickup(t('currentLocation'));
+          mapRef.current?.animateToRegion({ ...coords, latitudeDelta: 0.01, longitudeDelta: 0.01 }, 800);
+        } else {
+          // User is outside Jordan (e.g. testing from abroad) — pretend Amman
+          defaultToAmman();
+        }
       } catch {
-        // Location unavailable — fall back to Amman center
+        defaultToAmman();
       }
     })();
   }, []);
 
-  // Fetch rider profile (for waitlist badge)
+  function defaultToAmman() {
+    setPickupCoords(AMMAN);
+    setPickup('Amman, Jordan');
+    mapRef.current?.animateToRegion({ ...AMMAN, latitudeDelta: 0.05, longitudeDelta: 0.05 }, 800);
+  }
+
+  // ── Fetch rider profile ─────────────────────────────────────────────────
   useEffect(() => {
     if (!user) return;
     (async () => {
       try {
-        const session = await supabase.auth.getSession();
-        const token = session.data.session?.access_token;
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
         if (!token) return;
         const res = await fetch(`${API_URL}/api/riders/me`, {
-          headers: { 'Authorization': `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${token}` },
         });
-        if (res.ok) {
-          const data = await res.json();
-          setRiderProfile(data);
-        }
-      } catch {
-        // Non-fatal: badge just won't appear
-      }
+        if (res.ok) setRiderProfile(await res.json());
+      } catch { /* non-fatal */ }
     })();
   }, [user]);
 
-  // Subscribe to trip updates via Supabase Realtime
+  // ── Trip Realtime subscription ─────────────────────────────────────────
   useEffect(() => {
     if (!tripId) return;
 
-    // Race-condition guard: fetch current status immediately after subscribing
-    // so we don't miss any updates that arrived between trip creation and subscription setup.
     const channel = supabase
       .channel(`trip-${tripId}`)
       .on('postgres_changes', {
@@ -100,93 +141,147 @@ export default function HomeScreen() {
         filter: `id=eq.${tripId}`,
       }, (payload) => {
         const newStatus = payload.new.status as TripStatus;
+        const newDriverId = payload.new.driver_id as string | null;
         setTripStatus(newStatus);
+        if (newDriverId) setDriverId(newDriverId);
         if (newStatus === 'completed' || newStatus === 'cancelled') {
-          setTimeout(() => {
-            setTripStatus('idle');
-            setTripId(null);
-            setDriverLocation(null);
-            setDropoff('');
-            setDropoffCoords(null);
-            setFare(null);
-            fareAnim.setValue(0);
-            Animated.timing(sheetAnim, { toValue: 0, duration: 200, useNativeDriver: false }).start();
-          }, 3000);
+          setTimeout(() => resetTripState(), 3000);
         }
       })
       .subscribe(async () => {
-        // Once subscribed, poll for the latest status to catch any updates missed
-        // during the window between trip creation and subscription establishment.
+        // Poll for missed updates during subscription setup window
         try {
-          const session = await supabase.auth.getSession();
-          const token = session.data.session?.access_token;
+          const { data: { session } } = await supabase.auth.getSession();
+          const token = session?.access_token;
           if (!token) return;
           const res = await fetch(`${API_URL}/api/trips/${tripId}`, {
             headers: { Authorization: `Bearer ${token}` },
           });
           if (res.ok) {
             const data = await res.json();
-            const currentStatus = data.status as TripStatus;
-            if (currentStatus && currentStatus !== 'requested') {
-              setTripStatus(currentStatus);
+            if (data.status && data.status !== 'requested') {
+              setTripStatus(data.status as TripStatus);
             }
+            if (data.driver_id) setDriverId(data.driver_id);
           }
-        } catch {
-          // Non-fatal: Realtime events will still arrive going forward
-        }
+        } catch { /* non-fatal */ }
       });
 
     return () => { supabase.removeChannel(channel); };
   }, [tripId]);
 
-  // Animate sheet when trip status transitions between idle and active
+  // ── Live driver location subscription ──────────────────────────────────
   useEffect(() => {
-    if (tripStatus === 'idle') {
-      Animated.timing(sheetAnim, { toValue: 0, duration: 200, useNativeDriver: false }).start();
-    } else if (tripStatus === 'searching') {
-      Animated.timing(sheetAnim, { toValue: 1, duration: 200, useNativeDriver: false }).start();
+    if (!driverId) return;
+    // Only subscribe when there's an active trip with the driver
+    const inactive = ['idle', 'searching', 'completed', 'cancelled'];
+    if (inactive.includes(tripStatus)) return;
+
+    const channel = supabase
+      .channel(`driver-loc-${driverId}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'drivers',
+        filter: `id=eq.${driverId}`,
+      }, (payload) => {
+        const lat = payload.new.location_lat as number | null;
+        const lng = payload.new.location_lng as number | null;
+        if (lat != null && lng != null) {
+          setDriverLocation({ latitude: lat, longitude: lng });
+        }
+      })
+      .subscribe(async () => {
+        // Fetch current driver location immediately on subscribe
+        try {
+          const { data } = await supabase
+            .from('drivers')
+            .select('location_lat, location_lng')
+            .eq('id', driverId)
+            .single();
+          if (data?.location_lat != null && data?.location_lng != null) {
+            setDriverLocation({ latitude: data.location_lat, longitude: data.location_lng });
+          }
+        } catch { /* non-fatal */ }
+      });
+
+    return () => { supabase.removeChannel(channel); };
+  }, [driverId, tripStatus]);
+
+  // ── Destination autocomplete via Nominatim ─────────────────────────────
+  const fetchSuggestions = useCallback(async (query: string) => {
+    if (query.length < 2) { setSuggestions([]); return; }
+    setLoadingSuggestions(true);
+    try {
+      const q = encodeURIComponent(`${query} Jordan`);
+      const url = `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=5&countrycodes=jo&accept-language=en`;
+      const res = await fetch(url, { headers: { 'User-Agent': 'WaselApp/1.0' } });
+      const data: PlaceSuggestion[] = await res.json();
+      setSuggestions(data);
+    } catch {
+      setSuggestions([]);
+    } finally {
+      setLoadingSuggestions(false);
     }
-  }, [tripStatus]);
+  }, []);
 
-  // Handle map press to set dropoff
-  function handleMapPress(e: { nativeEvent: { coordinate: LatLng } }) {
-    if (activeInput === 'dropoff' || tripStatus === 'idle') {
-      const coord = e.nativeEvent.coordinate;
-      setDropoffCoords(coord);
-      setDropoff(`${coord.latitude.toFixed(4)}, ${coord.longitude.toFixed(4)}`);
-      setActiveInput(null);
-      Keyboard.dismiss();
+  function handleDropoffChange(text: string) {
+    setDropoff(text);
+    if (dropoffCoords) { setDropoffCoords(null); setFare(null); }
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => fetchSuggestions(text), 400);
+  }
 
-      // Estimate fare (simple distance-based)
-      if (pickupCoords) {
-        const dist = haversineKm(pickupCoords.latitude, pickupCoords.longitude, coord.latitude, coord.longitude);
-        const estimated = Math.max(1.5, 0.5 + dist * 0.35);
-        setFare(estimated.toFixed(2));
-        // Animate fare row in
-        fareAnim.setValue(0);
-        Animated.timing(fareAnim, { toValue: 1, duration: 250, useNativeDriver: true }).start();
-      }
+  function handleSelectSuggestion(place: PlaceSuggestion) {
+    const coords = { latitude: parseFloat(place.lat), longitude: parseFloat(place.lon) };
+    const parts = place.display_name.split(', ');
+    const label = parts.slice(0, 3).join(', ');
+
+    setDropoff(label);
+    setDropoffCoords(coords);
+    setSuggestions([]);
+    setIsSearchActive(false);
+    Keyboard.dismiss();
+
+    if (pickupCoords) {
+      const dist = haversineKm(pickupCoords.latitude, pickupCoords.longitude, coords.latitude, coords.longitude);
+      setFare(Math.max(1.5, 0.5 + dist * 0.35).toFixed(2));
+      mapRef.current?.fitToCoordinates([pickupCoords, coords], {
+        edgePadding: { top: 120, right: 60, bottom: 340, left: 60 },
+        animated: true,
+      });
+    } else {
+      mapRef.current?.animateToRegion({ ...coords, latitudeDelta: 0.02, longitudeDelta: 0.02 }, 600);
     }
   }
 
+  // Map tap — also sets dropoff (fallback / precision mode)
+  function handleMapPress(e: { nativeEvent: { coordinate: LatLng } }) {
+    if (isSearchActive || tripStatus !== 'idle') return;
+    const coord = e.nativeEvent.coordinate;
+    setDropoffCoords(coord);
+    setDropoff(`${coord.latitude.toFixed(4)}, ${coord.longitude.toFixed(4)}`);
+    setSuggestions([]);
+
+    if (pickupCoords) {
+      const dist = haversineKm(pickupCoords.latitude, pickupCoords.longitude, coord.latitude, coord.longitude);
+      setFare(Math.max(1.5, 0.5 + dist * 0.35).toFixed(2));
+    }
+  }
+
+  // ── Request ride ────────────────────────────────────────────────────────
   async function handleRequestRide() {
     if (!pickupCoords || !dropoffCoords) {
       Alert.alert(t('setPickupDropoff'), t('tapMapDest2'));
       return;
     }
-
     setTripStatus('searching');
-
     try {
-      const session = await supabase.auth.getSession();
-      const token = session.data.session?.access_token;
-
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
       const res = await fetch(`${API_URL}/api/trips`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           pickup_lat: pickupCoords.latitude,
           pickup_lng: pickupCoords.longitude,
@@ -195,84 +290,70 @@ export default function HomeScreen() {
           pickup_address: pickup,
           dropoff_address: dropoff,
           payment_method: 'cash',
-          ...(fare != null ? { fare_amount: parseFloat(fare) } : {}),
         }),
       });
-
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to request ride');
-
       setTripId(data.tripId);
       setTripStatus('dispatching');
-    } catch (err: unknown) {
-      // Do not surface raw API error messages to the user.
-      Alert.alert(t('error'), t('somethingWrong') || 'Something went wrong. Please try again.');
+    } catch {
+      Alert.alert(t('error'), t('somethingWrong'));
       setTripStatus('idle');
     }
   }
 
+  // ── Cancel trip ─────────────────────────────────────────────────────────
   async function handleCancelTrip() {
     if (tripId) {
       try {
-        const session = await supabase.auth.getSession();
-        const token = session.data.session?.access_token;
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
         if (token) {
           await fetch(`${API_URL}/api/trips/${tripId}/status`, {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`,
-            },
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
             body: JSON.stringify({ status: 'cancelled' }),
           });
         }
-      } catch {
-        // UI always resets regardless of network error
-      }
+      } catch { /* UI resets regardless */ }
     }
+    resetTripState();
+  }
+
+  function resetTripState() {
     setTripStatus('idle');
     setTripId(null);
+    setDriverId(null);
     setDriverLocation(null);
     setDropoff('');
     setDropoffCoords(null);
     setFare(null);
-    fareAnim.setValue(0);
-    Animated.timing(sheetAnim, { toValue: 0, duration: 200, useNativeDriver: false }).start();
+    setSuggestions([]);
+    setIsSearchActive(false);
   }
 
+  // ── Derived state ───────────────────────────────────────────────────────
   const statusLabel: Record<TripStatus, string> = {
-    idle: '',
-    searching: t('findingDrivers'),
-    dispatching: t('contactingDriver'),
-    accepted: t('driverAccepted'),
-    en_route: t('driverOnWay'),
-    arrived: t('driverArrived'),
-    in_progress: t('tripInProgress'),
-    completed: t('tripComplete'),
-    cancelled: 'Trip Cancelled',
+    idle: '', searching: t('findingDrivers'), dispatching: t('contactingDriver'),
+    accepted: t('driverAccepted'), en_route: t('driverOnWay'),
+    arrived: t('driverArrived'), in_progress: t('tripInProgress'),
+    completed: t('tripComplete'), cancelled: 'Trip cancelled',
   };
 
   const isActiveTrip = tripStatus !== 'idle';
   const isSearching = tripStatus === 'searching' || tripStatus === 'dispatching';
-  const statusDotColor = isSearching ? '#F5A623' : '#4CAF50';
-
-  const fareAnimStyle = {
-    opacity: fareAnim,
-    transform: [{
-      translateY: fareAnim.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }),
-    }],
-  };
+  const showUserLocation = location != null && inJordan(location.latitude, location.longitude);
 
   return (
     <View style={styles.container}>
-      {/* Map fills entire background */}
+      {/* Map ─────────────────────────────────────────────────────────── */}
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
         provider={PROVIDER_GOOGLE}
         initialRegion={{ ...AMMAN, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
         onPress={handleMapPress}
-        showsUserLocation
+        showsUserLocation={showUserLocation}
         showsMyLocationButton={false}
       >
         {pickupCoords && (
@@ -298,7 +379,7 @@ export default function HomeScreen() {
         )}
       </MapView>
 
-      {/* Top bar — overlaid on map */}
+      {/* Top bar ─────────────────────────────────────────────────────── */}
       <SafeAreaView style={styles.topBar} edges={['top']}>
         <View style={styles.topBarInner}>
           <View style={styles.logoRow}>
@@ -313,56 +394,108 @@ export default function HomeScreen() {
         </View>
       </SafeAreaView>
 
-      {/* Map spacer — lets map tap events pass through */}
+      {/* Transparent spacer — passes map touch events through */}
       <View style={styles.mapSpacer} pointerEvents="none" />
 
-      {/* Booking panel — anchored naturally at bottom as flex child */}
-      <View style={[styles.bookingPanel, { paddingBottom: 60 }]}>
-        {/* Drag handle */}
+      {/* Bottom booking panel ─────────────────────────────────────────── */}
+      <View style={styles.bookingPanel}>
         <View style={styles.sheetHandle} />
 
         {!isActiveTrip ? (
           <>
             <Text style={styles.sheetTitle}>{t('whereTo')}</Text>
 
-            {/* Pickup input */}
-            <TouchableOpacity
-              style={[styles.inputField, activeInput === 'pickup' && styles.inputFieldActive]}
-              onPress={() => setActiveInput('pickup')}
-              activeOpacity={0.75}
-            >
+            {/* Pickup row (read-only display) */}
+            <View style={styles.inputRow}>
               <Ionicons name="radio-button-on" size={16} color="#F5A623" />
-              <Text style={[styles.inputFieldText, !pickup && styles.placeholder]}>
+              <Text style={[styles.inputDisplayText, !pickup && styles.placeholder]} numberOfLines={1}>
                 {pickup || t('setPickup')}
               </Text>
-            </TouchableOpacity>
+            </View>
 
-            {/* Connecting line between inputs */}
-            <View style={styles.routeLine} />
+            <View style={styles.routeDivider} />
 
-            {/* Dropoff input */}
-            <TouchableOpacity
-              style={[styles.inputField, activeInput === 'dropoff' && styles.inputFieldActive]}
-              onPress={() => setActiveInput('dropoff')}
-              activeOpacity={0.75}
-            >
+            {/* Dropoff row — editable TextInput */}
+            <View style={[styles.inputRow, isSearchActive && styles.inputRowFocused]}>
               <Ionicons name="location" size={16} color="#4CAF50" />
-              <Text style={[styles.inputFieldText, !dropoff && styles.placeholder]}>
-                {dropoff || t('tapMapDest')}
-              </Text>
-            </TouchableOpacity>
+              <TextInput
+                style={styles.dropoffInput}
+                placeholder={t('tapMapDest')}
+                placeholderTextColor="#555"
+                value={dropoff}
+                onChangeText={handleDropoffChange}
+                onFocus={() => {
+                  setIsSearchActive(true);
+                  // Clear coords so the user can type a new search
+                  if (dropoffCoords) { setDropoffCoords(null); setFare(null); }
+                }}
+                onBlur={() => {
+                  // Small delay so suggestion taps register before blur hides them
+                  setTimeout(() => {
+                    setIsSearchActive(false);
+                    setSuggestions([]);
+                  }, 200);
+                }}
+                returnKeyType="search"
+                autoCorrect={false}
+              />
+              {dropoff.length > 0 && (
+                <TouchableOpacity onPress={() => {
+                  setDropoff(''); setDropoffCoords(null); setFare(null); setSuggestions([]);
+                }}>
+                  <Ionicons name="close-circle" size={18} color="#444" />
+                </TouchableOpacity>
+              )}
+            </View>
 
-            {/* Fare estimate — animated in */}
-            {fare && dropoffCoords && (
-              <Animated.View style={[styles.fareRow, fareAnimStyle]}>
-                <View style={styles.fareTopRow}>
-                  <Text style={styles.fareLabel}>{t('estimatedFare')}</Text>
-                  <Text style={styles.fareAmount}>{fare} JD</Text>
-                </View>
-                <Text style={styles.fareNote}>{t('cashPayment')} · {t('tapMapDest')}</Text>
-              </Animated.View>
+            {/* Autocomplete suggestions */}
+            {isSearchActive && (suggestions.length > 0 || loadingSuggestions) && (
+              <View style={styles.suggestionsBox}>
+                {loadingSuggestions && suggestions.length === 0 ? (
+                  <View style={styles.suggestionsLoading}>
+                    <ActivityIndicator size="small" color="#F5A623" />
+                  </View>
+                ) : (
+                  <FlatList
+                    data={suggestions}
+                    keyExtractor={(item) => item.place_id}
+                    keyboardShouldPersistTaps="always"
+                    scrollEnabled={false}
+                    renderItem={({ item, index }) => {
+                      const parts = item.display_name.split(', ');
+                      const main = parts[0];
+                      const sub = parts.slice(1, 3).join(', ');
+                      const isLast = index === suggestions.length - 1;
+                      return (
+                        <TouchableOpacity
+                          style={[styles.suggestionRow, !isLast && styles.suggestionRowBorder]}
+                          onPress={() => handleSelectSuggestion(item)}
+                        >
+                          <Ionicons name="location-outline" size={16} color="#555" style={styles.suggestionIcon} />
+                          <View style={styles.suggestionText}>
+                            <Text style={styles.suggestionMain} numberOfLines={1}>{main}</Text>
+                            {sub ? <Text style={styles.suggestionSub} numberOfLines={1}>{sub}</Text> : null}
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    }}
+                  />
+                )}
+              </View>
             )}
 
+            {/* Fare estimate */}
+            {fare && dropoffCoords && !isSearchActive && (
+              <View style={styles.fareRow}>
+                <View>
+                  <Text style={styles.fareLabel}>{t('estimatedFare')}</Text>
+                  <Text style={styles.fareNote}>{t('cashPayment')}</Text>
+                </View>
+                <Text style={styles.fareAmount}>{fare} JD</Text>
+              </View>
+            )}
+
+            {/* Request button */}
             <TouchableOpacity
               style={[styles.requestButton, !dropoffCoords && styles.requestButtonDisabled]}
               onPress={handleRequestRide}
@@ -373,261 +506,153 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </>
         ) : (
+          /* Active trip panel */
           <View style={styles.statusSheet}>
-            {/* Status indicator */}
             <View style={styles.statusRow}>
-              {isSearching ? (
-                <ActivityIndicator color="#F5A623" style={styles.statusSpinner} />
-              ) : (
-                <View style={[styles.statusDot, { backgroundColor: statusDotColor }]} />
-              )}
-              {tripStatus === 'completed' ? (
-                <Text style={styles.statusLabel}>Trip complete</Text>
-              ) : (
-                <Text style={styles.statusLabel}>{statusLabel[tripStatus]}</Text>
-              )}
+              {isSearching
+                ? <ActivityIndicator color="#F5A623" />
+                : <View style={[styles.statusDot, { backgroundColor: isSearching ? '#F5A623' : '#4CAF50' }]} />
+              }
+              <Text style={styles.statusLabel}>{statusLabel[tripStatus]}</Text>
             </View>
 
-            {/* Cancel button — full width outline */}
+            {fare && (
+              <View style={styles.activeFareRow}>
+                <Text style={styles.activeFareLabel}>{t('estimatedFare')}</Text>
+                <Text style={styles.activeFareAmount}>{fare} JD</Text>
+              </View>
+            )}
+
             {tripStatus !== 'completed' && tripStatus !== 'in_progress' && (
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={handleCancelTrip}
-                activeOpacity={0.75}
-              >
+              <TouchableOpacity style={styles.cancelButton} onPress={handleCancelTrip} activeOpacity={0.75}>
                 <Text style={styles.cancelButtonText}>{t('cancel')}</Text>
               </TouchableOpacity>
             )}
           </View>
         )}
+
+        <View style={{ height: Platform.OS === 'ios' ? 20 : 8 }} />
       </View>
     </View>
   );
 }
 
-function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a = Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0A0A0A',
-  },
+  container: { flex: 1, backgroundColor: '#0A0A0A' },
 
   // Top bar
-  topBar: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-  },
+  topBar: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
   topBarInner: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginHorizontal: 20,
-    marginTop: 8,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    marginHorizontal: 20, marginTop: 8,
     backgroundColor: 'rgba(10,10,10,0.82)',
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: '#1E1E1E',
+    borderRadius: 14, paddingHorizontal: 16, paddingVertical: 10,
+    borderWidth: 1, borderColor: '#1E1E1E',
   },
-  logoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  topLogo: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#F5A623',
-  },
+  logoRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  topLogo: { fontSize: 22, fontWeight: '700', color: '#F5A623' },
   earlyBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(245,166,35,0.15)',
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderWidth: 1,
-    borderColor: 'rgba(245,166,35,0.3)',
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: 'rgba(245,166,35,0.15)', borderRadius: 10,
+    paddingHorizontal: 8, paddingVertical: 3,
+    borderWidth: 1, borderColor: 'rgba(245,166,35,0.3)',
   },
-  earlyBadgeText: {
-    color: '#F5A623',
-    fontSize: 10,
-    fontWeight: '600',
-  },
+  earlyBadgeText: { color: '#F5A623', fontSize: 10, fontWeight: '600' },
 
-  // Map spacer — transparent, lets map touch events through
-  mapSpacer: {
-    flex: 1,
-  },
+  mapSpacer: { flex: 1 },
 
   // Booking panel
   bookingPanel: {
     backgroundColor: '#111',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 12,
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    paddingHorizontal: 20, paddingTop: 12,
+    shadowColor: '#000', shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.35, shadowRadius: 12, elevation: 12,
   },
-
-  // Drag handle
   sheetHandle: {
-    width: 36,
-    height: 4,
-    backgroundColor: '#2A2A2A',
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: 16,
+    width: 36, height: 4, backgroundColor: '#2A2A2A',
+    borderRadius: 2, alignSelf: 'center', marginBottom: 16,
+  },
+  sheetTitle: { fontSize: 22, fontWeight: '700', color: '#FFF', marginBottom: 12 },
+
+  // Input rows
+  inputRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: '#161616', borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 12,
+    borderWidth: 1, borderColor: '#1E1E1E',
+  },
+  inputRowFocused: { borderColor: '#F5A623' },
+  inputDisplayText: { flex: 1, fontSize: 15, color: '#FFF' },
+  placeholder: { color: '#555' },
+  dropoffInput: {
+    flex: 1, fontSize: 15, color: '#FFF',
+    paddingVertical: 0, // prevent extra Android padding
+  },
+  routeDivider: {
+    width: 1, height: 16, backgroundColor: '#2A2A2A',
+    marginLeft: 21, marginVertical: 3,
   },
 
-  sheetTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#FFF',
-    marginBottom: 14,
+  // Autocomplete suggestions
+  suggestionsBox: {
+    backgroundColor: '#161616', borderRadius: 12,
+    borderWidth: 1, borderColor: '#1E1E1E',
+    marginTop: 4, maxHeight: 220, overflow: 'hidden',
   },
+  suggestionsLoading: { padding: 16, alignItems: 'center' },
+  suggestionRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 14, paddingVertical: 12,
+  },
+  suggestionRowBorder: { borderBottomWidth: 1, borderBottomColor: '#1A1A1A' },
+  suggestionIcon: { marginRight: 10 },
+  suggestionText: { flex: 1 },
+  suggestionMain: { color: '#FFF', fontSize: 14, fontWeight: '500' },
+  suggestionSub: { color: '#666', fontSize: 12, marginTop: 2 },
 
-  // Input fields
-  inputField: {
-    backgroundColor: '#161616',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    borderWidth: 1,
-    borderColor: '#1E1E1E',
-  },
-  inputFieldActive: {
-    borderColor: '#2A2A2A',
-  },
-  inputFieldText: {
-    flex: 1,
-    fontSize: 16,
-    color: '#FFF',
-  },
-  placeholder: {
-    color: '#555',
-  },
-
-  // Connecting line between pickup and dropoff
-  routeLine: {
-    width: 1,
-    height: 20,
-    backgroundColor: '#2A2A2A',
-    marginLeft: 21,
-    marginVertical: 2,
-  },
-
-  // Fare row
+  // Fare estimate
   fareRow: {
-    backgroundColor: '#161616',
-    borderRadius: 12,
-    padding: 14,
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: '#1E1E1E',
-    gap: 4,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    backgroundColor: '#161616', borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 12,
+    marginTop: 10, borderWidth: 1, borderColor: '#1E1E1E',
   },
-  fareTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  fareLabel: {
-    color: '#888',
-    fontSize: 13,
-  },
-  fareAmount: {
-    color: '#F5A623',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  fareNote: {
-    color: '#555',
-    fontSize: 12,
-  },
+  fareLabel: { color: '#888', fontSize: 13, marginBottom: 2 },
+  fareNote: { color: '#555', fontSize: 12 },
+  fareAmount: { color: '#F5A623', fontSize: 22, fontWeight: '700' },
 
   // Request button
   requestButton: {
-    backgroundColor: '#F5A623',
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 16,
+    backgroundColor: '#F5A623', borderRadius: 14,
+    paddingVertical: 16, alignItems: 'center', marginTop: 14,
   },
-  requestButtonDisabled: {
-    opacity: 0.35,
-  },
-  requestButtonText: {
-    color: '#000',
-    fontWeight: '700',
-    fontSize: 17,
-  },
+  requestButtonDisabled: { opacity: 0.35 },
+  requestButtonText: { color: '#000', fontWeight: '700', fontSize: 17 },
 
-  // Status / active trip panel
-  statusSheet: {
-    paddingVertical: 8,
-    gap: 16,
+  // Active trip panel
+  statusSheet: { gap: 14, paddingVertical: 6 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  statusDot: { width: 10, height: 10, borderRadius: 5 },
+  statusLabel: { fontSize: 17, fontWeight: '700', color: '#FFF', flex: 1 },
+  activeFareRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    backgroundColor: '#161616', borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 10,
+    borderWidth: 1, borderColor: '#1E1E1E',
   },
-  statusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  statusSpinner: {
-    // ActivityIndicator has its own sizing
-  },
-  statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  statusLabel: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#FFF',
-  },
+  activeFareLabel: { color: '#888', fontSize: 13 },
+  activeFareAmount: { color: '#F5A623', fontSize: 18, fontWeight: '700' },
   cancelButton: {
-    borderWidth: 1,
-    borderColor: '#2A2A2A',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
+    borderWidth: 1, borderColor: '#2A2A2A', borderRadius: 12,
+    paddingVertical: 14, alignItems: 'center',
   },
-  cancelButtonText: {
-    color: '#888',
-    fontSize: 15,
-    fontWeight: '500',
-  },
+  cancelButtonText: { color: '#888', fontSize: 15, fontWeight: '500' },
 
   // Driver marker on map
   driverMarker: {
-    backgroundColor: '#F5A623',
-    borderRadius: 20,
-    width: 28,
-    height: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#FFF',
+    backgroundColor: '#F5A623', borderRadius: 20,
+    width: 28, height: 28, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: '#FFF',
   },
 });

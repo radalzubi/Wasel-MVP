@@ -356,7 +356,7 @@ export default function DashboardScreen() {
         {location && (
           <Marker coordinate={location}>
             <View style={styles.driverMarker}>
-              <Text>🚗</Text>
+              <View style={styles.driverMarkerDot} />
             </View>
           </Marker>
         )}
@@ -371,7 +371,7 @@ export default function DashboardScreen() {
             </Text>
             <View style={[styles.tierBadge, { backgroundColor: tierBadge.color }]}>
               <Text style={[styles.tierBadgeText, { color: tierBadge.text }]}>
-                {tierBadge.label} · {tierBadge.price} JD/mo
+                {tierBadge.label}
               </Text>
             </View>
           </View>
@@ -399,7 +399,7 @@ export default function DashboardScreen() {
               <View style={styles.waitingRow}>
                 <Text style={styles.waitingText}>{t('waitingForTrips')}</Text>
                 <View style={styles.fareIsYoursRow}>
-                  <Text style={styles.fareIsYoursText}>💰 {t('fareIsYours')}</Text>
+                  <Text style={styles.fareIsYoursText}>{t('fareIsYours')}</Text>
                 </View>
                 <View style={styles.earningsRow}>
                   <Text style={styles.earningsLabel}>{t('todayEarnings')}</Text>
@@ -500,8 +500,13 @@ const styles = StyleSheet.create({
   },
   tierBadgeText: { fontSize: 11, fontWeight: '700' },
   driverMarker: {
-    backgroundColor: '#111', borderRadius: 20, padding: 4,
-    borderWidth: 1, borderColor: '#333',
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: '#F5A623',
+    justifyContent: 'center', alignItems: 'center',
+    borderWidth: 2, borderColor: '#FFF',
+  },
+  driverMarkerDot: {
+    width: 10, height: 10, borderRadius: 5, backgroundColor: '#000',
   },
   bottomPanel: {
     position: 'absolute', bottom: 0, left: 0, right: 0,

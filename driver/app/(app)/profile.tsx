@@ -27,19 +27,19 @@ interface DriverProfile {
 
 const TIER_DATA = {
   1: {
-    emoji: '🥈', nameKey: 'silver', descKey: 'tierSilverDesc',
+    nameKey: 'silver', descKey: 'tierSilverDesc',
     price: 20, weight: 40,
     borderColor: '#3A3A3A', badgeColor: '#2A2A2A', badgeText: '#AAA', accentColor: '#888',
     next: 2 as const,
   },
   2: {
-    emoji: '🥇', nameKey: 'gold', descKey: 'tierGoldDesc',
+    nameKey: 'gold', descKey: 'tierGoldDesc',
     price: 35, weight: 70,
     borderColor: '#F5A623', badgeColor: '#F5A623', badgeText: '#000', accentColor: '#F5A623',
     next: 3 as const,
   },
   3: {
-    emoji: '💎', nameKey: 'platinum', descKey: 'tierPlatinumDesc',
+    nameKey: 'platinum', descKey: 'tierPlatinumDesc',
     price: 50, weight: 100,
     borderColor: '#8B5CF6', badgeColor: '#8B5CF6', badgeText: '#FFF', accentColor: '#8B5CF6',
     next: null,
@@ -160,7 +160,7 @@ export default function ProfileScreen() {
             <Text style={styles.tierSectionLabel}>{t('subscriptionTier')}</Text>
             <View style={[styles.tierBadge, { backgroundColor: tierInfo.badgeColor }]}>
               <Text style={[styles.tierBadgeText, { color: tierInfo.badgeText }]}>
-                {tierInfo.emoji} {t(tierInfo.nameKey)}
+                {t(tierInfo.nameKey)}
               </Text>
             </View>
           </View>
@@ -172,7 +172,7 @@ export default function ProfileScreen() {
             </Text>
             <Text style={styles.tierPriceUnit}> / month</Text>
             <View style={styles.tierPriceSep} />
-            <Text style={styles.tierKeepFare}>💰 {t('keepsFare')}</Text>
+            <Text style={styles.tierKeepFare}>{t('keepsFare')}</Text>
           </View>
 
           {/* Dispatch weight bar */}
@@ -199,7 +199,7 @@ export default function ProfileScreen() {
               <View style={styles.upgradeBox}>
                 <View style={styles.upgradeBoxTop}>
                   <Text style={styles.upgradeBoxTitle}>
-                    {t('upgradeTo')} {next.emoji} {t(next.nameKey)}
+                    {t('upgradeTo')} {t(next.nameKey)}
                   </Text>
                   <Text style={[styles.upgradeBoxPrice, { color: next.accentColor }]}>
                     {next.price} JD/mo
@@ -214,7 +214,7 @@ export default function ProfileScreen() {
         {/* Vehicle Card */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
-            <Text style={styles.cardHeaderEmoji}>🚗</Text>
+            <Ionicons name="car-outline" size={20} color="#F5A623" style={styles.cardHeaderIcon} />
             <Text style={styles.cardHeaderTitle}>{t('vehicle')}</Text>
           </View>
           <View style={styles.vehicleRow}>
@@ -232,7 +232,7 @@ export default function ProfileScreen() {
         {profile.is_waitlist_member && (
           <View style={[styles.card, styles.earlyMemberCard]}>
             <View style={styles.earlyMemberRow}>
-              <Text style={styles.earlyMemberIcon}>⭐</Text>
+              <Ionicons name="star" size={28} color="#F5A623" style={{ marginTop: 2, marginRight: 4 }} />
               <View style={styles.earlyMemberInfo}>
                 <Text style={styles.earlyMemberTitle}>{t('earlyMemberTitle')}</Text>
                 {profile.waitlist_position != null && (
@@ -381,7 +381,7 @@ const styles = StyleSheet.create({
 
   // Vehicle
   cardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 },
-  cardHeaderEmoji: { fontSize: 18 },
+  cardHeaderIcon: {},
   cardHeaderTitle: { fontSize: 15, fontWeight: '700', color: '#FFF' },
   vehicleRow: { marginBottom: 10 },
   vehicleValue: { fontSize: 18, fontWeight: '600', color: '#FFF' },
@@ -397,7 +397,6 @@ const styles = StyleSheet.create({
   // Early member
   earlyMemberCard: { borderColor: '#F5A623' },
   earlyMemberRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  earlyMemberIcon: { fontSize: 28, marginTop: 2 },
   earlyMemberInfo: { flex: 1 },
   earlyMemberTitle: { fontSize: 16, fontWeight: '700', color: '#F5A623', marginBottom: 4 },
   earlyMemberPosition: { fontSize: 13, color: '#888', marginBottom: 6 },
