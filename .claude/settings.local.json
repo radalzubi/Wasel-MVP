@@ -25,7 +25,8 @@
       "Bash(curl -s -X POST http://localhost:3001/api/auth/verify -H 'Content-Type: application/json' -d '{\"phone\":\"+96279000001\",\"token\":\"123456\",\"role\":\"rider\"}')",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('session ok:', bool\\(d.get\\('session'\\)\\), '| is_wl:', d.get\\('user',{}\\)\\)\")",
       "Bash(pkill -f \"ts-node-dev\")",
-      "Bash(pkill -f \"wasel\")"
+      "Bash(pkill -f \"wasel\")",
+      "Bash(git pull *)"
     ]
   }
 }

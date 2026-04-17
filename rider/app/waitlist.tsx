@@ -12,10 +12,12 @@ import {
   Platform,
 } from 'react-native';
 import { router } from 'expo-router';
+import { useLanguage } from '../contexts/LanguageContext';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
 export default function WaitlistScreen() {
+  const { t } = useLanguage();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [city, setCity] = useState('');
@@ -23,7 +25,7 @@ export default function WaitlistScreen() {
 
   async function handleJoin() {
     if (!name.trim() || !phone.trim()) {
-      Alert.alert('Missing info', 'Please enter your name and phone number.');
+      Alert.alert(t('missingInfo'), t('enterNamePhone'));
       return;
     }
 
@@ -43,7 +45,7 @@ export default function WaitlistScreen() {
       if (!res.ok) throw new Error(data.error || 'Failed to join');
       router.replace('/waitlist-success');
     } catch (err: unknown) {
-      Alert.alert('Error', err instanceof Error ? err.message : 'Something went wrong');
+      Alert.alert(t('error'), err instanceof Error ? err.message : t('somethingWrong'));
     } finally {
       setLoading(false);
     }
@@ -63,14 +65,14 @@ export default function WaitlistScreen() {
         <View style={styles.header}>
           <Text style={styles.logo}>وصل</Text>
           <Text style={styles.logoEn}>Wasel</Text>
-          <Text style={styles.tagline}>The ride-hailing app built for Jordan</Text>
+          <Text style={styles.tagline}>{t('taglineRider')}</Text>
         </View>
 
         {/* Form */}
         <View style={styles.form}>
-          <Text style={styles.sectionTitle}>Be the first to ride</Text>
+          <Text style={styles.sectionTitle}>{t('beFirstToRide')}</Text>
 
-          <Text style={styles.label}>Full Name</Text>
+          <Text style={styles.label}>{t('fullName')}</Text>
           <TextInput
             style={styles.input}
             placeholder="Ahmad Al-Khalidi"
@@ -80,7 +82,7 @@ export default function WaitlistScreen() {
             autoCapitalize="words"
           />
 
-          <Text style={styles.label}>Phone Number</Text>
+          <Text style={styles.label}>{t('phoneNumber')}</Text>
           <TextInput
             style={styles.input}
             placeholder="+962 7X XXX XXXX"
@@ -90,7 +92,7 @@ export default function WaitlistScreen() {
             keyboardType="phone-pad"
           />
 
-          <Text style={styles.label}>City (optional)</Text>
+          <Text style={styles.label}>{t('cityOptional')}</Text>
           <TextInput
             style={styles.input}
             placeholder="Amman, Zarqa, Irbid..."
@@ -109,13 +111,11 @@ export default function WaitlistScreen() {
             {loading ? (
               <ActivityIndicator color="#000" />
             ) : (
-              <Text style={styles.buttonText}>Join the Waitlist</Text>
+              <Text style={styles.buttonText}>{t('joinWaitlist')}</Text>
             )}
           </TouchableOpacity>
 
-          <Text style={styles.disclaimer}>
-            We'll notify you when Wasel launches in your city.{'\n'}No spam, ever.
-          </Text>
+          <Text style={styles.disclaimer}>{t('waitlistDisclaimer')}</Text>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

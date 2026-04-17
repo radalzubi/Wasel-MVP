@@ -12,12 +12,14 @@ import {
   Platform,
 } from 'react-native';
 import { router } from 'expo-router';
+import { useLanguage } from '../contexts/LanguageContext';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
 const VEHICLE_TYPES = ['Sedan', 'SUV', 'Van', 'Minibus'];
 
 export default function DriverWaitlistScreen() {
+  const { t } = useLanguage();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [city, setCity] = useState('');
@@ -26,7 +28,7 @@ export default function DriverWaitlistScreen() {
 
   async function handleJoin() {
     if (!name.trim() || !phone.trim()) {
-      Alert.alert('Missing info', 'Please enter your name and phone number.');
+      Alert.alert(t('missingInfo'), t('enterNamePhone'));
       return;
     }
 
@@ -47,7 +49,7 @@ export default function DriverWaitlistScreen() {
       if (!res.ok) throw new Error(data.error || 'Failed to join');
       router.replace('/waitlist-success');
     } catch (err: unknown) {
-      Alert.alert('Error', err instanceof Error ? err.message : 'Something went wrong');
+      Alert.alert(t('error'), err instanceof Error ? err.message : t('somethingWrong'));
     } finally {
       setLoading(false);
     }
@@ -67,23 +69,23 @@ export default function DriverWaitlistScreen() {
         <View style={styles.header}>
           <Text style={styles.logo}>وصل</Text>
           <Text style={styles.logoEn}>Wasel</Text>
-          <Text style={styles.tagline}>Drive with Wasel — earn more, pay less</Text>
+          <Text style={styles.tagline}>{t('taglineDriver')}</Text>
         </View>
 
         {/* Earning pitch */}
         <View style={styles.pitchRow}>
-          {['No commission', 'Flat subscription', 'You keep earnings'].map((item) => (
-            <View key={item} style={styles.pitchItem}>
-              <Text style={styles.pitchText}>{item}</Text>
+          {(['noCommission', 'flatSubscription', 'keepEarnings'] as const).map((key) => (
+            <View key={key} style={styles.pitchItem}>
+              <Text style={styles.pitchText}>{t(key)}</Text>
             </View>
           ))}
         </View>
 
         {/* Form */}
         <View style={styles.form}>
-          <Text style={styles.sectionTitle}>Join as a driver</Text>
+          <Text style={styles.sectionTitle}>{t('joinAsDriver')}</Text>
 
-          <Text style={styles.label}>Full Name</Text>
+          <Text style={styles.label}>{t('fullName')}</Text>
           <TextInput
             style={styles.input}
             placeholder="Mohammad Al-Ahmad"
@@ -93,7 +95,7 @@ export default function DriverWaitlistScreen() {
             autoCapitalize="words"
           />
 
-          <Text style={styles.label}>Phone Number</Text>
+          <Text style={styles.label}>{t('phoneNumber')}</Text>
           <TextInput
             style={styles.input}
             placeholder="+962 7X XXX XXXX"
@@ -103,7 +105,7 @@ export default function DriverWaitlistScreen() {
             keyboardType="phone-pad"
           />
 
-          <Text style={styles.label}>City (optional)</Text>
+          <Text style={styles.label}>{t('cityOptional')}</Text>
           <TextInput
             style={styles.input}
             placeholder="Amman, Zarqa, Irbid..."
@@ -113,7 +115,7 @@ export default function DriverWaitlistScreen() {
             autoCapitalize="words"
           />
 
-          <Text style={styles.label}>Vehicle Type (optional)</Text>
+          <Text style={styles.label}>{t('vehicleType')}</Text>
           <View style={styles.vehicleRow}>
             {VEHICLE_TYPES.map((type) => (
               <TouchableOpacity
@@ -137,13 +139,11 @@ export default function DriverWaitlistScreen() {
             {loading ? (
               <ActivityIndicator color="#000" />
             ) : (
-              <Text style={styles.buttonText}>Join as Driver</Text>
+              <Text style={styles.buttonText}>{t('joinAsDriverBtn')}</Text>
             )}
           </TouchableOpacity>
 
-          <Text style={styles.disclaimer}>
-            We'll contact you when onboarding opens in your city.{'\n'}No spam, ever.
-          </Text>
+          <Text style={styles.disclaimer}>{t('driverDisclaimer')}</Text>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

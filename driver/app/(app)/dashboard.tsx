@@ -7,6 +7,7 @@ import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLanguage } from '../../contexts/LanguageContext';
 import { supabase } from '../../lib/supabase';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
@@ -27,6 +28,7 @@ interface LatLng { latitude: number; longitude: number; }
 
 export default function DashboardScreen() {
   const { user, signOut } = useAuth();
+  const { t, language, toggleLanguage } = useLanguage();
   const mapRef = useRef<MapView>(null);
 
   const [isOnline, setIsOnline] = useState(false);
@@ -36,16 +38,20 @@ export default function DashboardScreen() {
   const [currentTrip, setCurrentTrip] = useState<{ id: string; status: string } | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Get location + start sending pings when online
+  // Get location on mount
   useEffect(() => {
     (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') return;
 
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
-      setLocation(coords);
-      mapRef.current?.animateToRegion({ ...coords, latitudeDelta: 0.01, longitudeDelta: 0.01 }, 800);
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+        const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+        setLocation(coords);
+        mapRef.current?.animateToRegion({ ...coords, latitudeDelta: 0.01, longitudeDelta: 0.01 }, 800);
+      } catch {
+        // Location unavailable — fall back to Amman center
+      }
     })();
   }, []);
 
@@ -116,7 +122,7 @@ export default function DashboardScreen() {
     return () => { supabase.removeChannel(channel); };
   }, [user]);
 
-  // Offer countdown timer — always clear existing interval before starting a new one
+  // Offer countdown timer
   useEffect(() => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
@@ -125,14 +131,14 @@ export default function DashboardScreen() {
     if (!offer) return;
 
     timerRef.current = setInterval(() => {
-      setOfferTimer((t) => {
-        if (t <= 1) {
+      setOfferTimer((prev) => {
+        if (prev <= 1) {
           clearInterval(timerRef.current!);
           timerRef.current = null;
           setOffer(null);
           return 0;
         }
-        return t - 1;
+        return prev - 1;
       });
     }, 1000);
 
@@ -146,15 +152,17 @@ export default function DashboardScreen() {
 
   async function toggleOnline(value: boolean) {
     setIsOnline(value);
-
-    const session = await supabase.auth.getSession();
-    const token = session.data.session?.access_token;
-    if (!token) return;
-    await fetch(`${API_URL}/api/drivers/status`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ is_online: value, is_available: value }),
-    });
+    try {
+      const session = await supabase.auth.getSession();
+      const token = session.data.session?.access_token;
+      await fetch(`${API_URL}/api/drivers/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ is_online: value, is_available: value }),
+      });
+    } catch {
+      // Non-fatal
+    }
   }
 
   async function handleAccept() {
@@ -183,12 +191,15 @@ export default function DashboardScreen() {
       setOffer(null);
     } catch (err: unknown) {
       Alert.alert('Could not accept trip', err instanceof Error ? err.message : 'Please try again.');
-      setOffer(null); // dismiss offer — it may have expired
+      setOffer(null);
     }
   }
 
   function handleDecline() {
-    clearInterval(timerRef.current!);
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
     setOffer(null);
   }
 
@@ -221,10 +232,10 @@ export default function DashboardScreen() {
     }
   }
 
-  const tripActions: Record<string, { label: string; next: string }> = {
-    accepted: { label: 'I\'ve arrived', next: 'arrived' },
-    arrived: { label: 'Start trip', next: 'in_progress' },
-    in_progress: { label: 'Complete trip', next: 'completed' },
+  const tripActions: Record<string, { labelKey: string; next: string }> = {
+    accepted: { labelKey: 'iArrived', next: 'arrived' },
+    arrived: { labelKey: 'startTrip', next: 'in_progress' },
+    in_progress: { labelKey: 'completeTrip', next: 'completed' },
   };
 
   return (
@@ -248,10 +259,17 @@ export default function DashboardScreen() {
       {/* Top bar */}
       <SafeAreaView style={styles.topBar} edges={['top']}>
         <View style={styles.topBarInner}>
-          <Text style={styles.topLogo}>وصل <Text style={styles.driverBadge}>Driver</Text></Text>
-          <TouchableOpacity onPress={signOut}>
-            <Text style={styles.signOut}>Sign out</Text>
-          </TouchableOpacity>
+          <Text style={styles.topLogo}>
+            وصل <Text style={styles.driverBadge}>Driver</Text>
+          </Text>
+          <View style={styles.topActions}>
+            <TouchableOpacity style={styles.langToggle} onPress={toggleLanguage}>
+              <Text style={styles.langToggleText}>{language === 'en' ? 'AR' : 'EN'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={signOut}>
+              <Text style={styles.signOut}>{t('signOut')}</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </SafeAreaView>
 
@@ -261,8 +279,8 @@ export default function DashboardScreen() {
           <>
             <View style={styles.onlineRow}>
               <View>
-                <Text style={styles.onlineLabel}>{isOnline ? '🟢 Online' : '⚫ Offline'}</Text>
-                <Text style={styles.onlineSub}>{isOnline ? 'Accepting trips' : 'Go online to receive trips'}</Text>
+                <Text style={styles.onlineLabel}>{isOnline ? t('online') : t('offline')}</Text>
+                <Text style={styles.onlineSub}>{isOnline ? t('acceptingTrips') : t('goOnlineMsg')}</Text>
               </View>
               <Switch
                 value={isOnline}
@@ -274,19 +292,19 @@ export default function DashboardScreen() {
 
             {isOnline && (
               <View style={styles.waitingRow}>
-                <Text style={styles.waitingText}>Waiting for trips...</Text>
+                <Text style={styles.waitingText}>{t('waitingForTrips')}</Text>
               </View>
             )}
           </>
         ) : (
           <View>
-            <Text style={styles.tripActiveLabel}>Trip in progress</Text>
-            {tripActions[currentTrip.status] && (
+            <Text style={styles.tripActiveLabel}>{t('tripActive')}</Text>
+            {currentTrip.status && tripActions[currentTrip.status] && (
               <TouchableOpacity
                 style={styles.tripActionButton}
                 onPress={() => advanceTripStatus(tripActions[currentTrip.status].next)}
               >
-                <Text style={styles.tripActionText}>{tripActions[currentTrip.status].label}</Text>
+                <Text style={styles.tripActionText}>{t(tripActions[currentTrip.status].labelKey)}</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -298,7 +316,7 @@ export default function DashboardScreen() {
         <View style={styles.offerOverlay}>
           <View style={styles.offerCard}>
             <View style={styles.offerTimerRow}>
-              <Text style={styles.offerTimerLabel}>New trip request</Text>
+              <Text style={styles.offerTimerLabel}>{t('newTripRequest')}</Text>
               <View style={[styles.offerTimer, offerTimer <= 5 && styles.offerTimerUrgent]}>
                 <Text style={styles.offerTimerText}>{offerTimer}s</Text>
               </View>
@@ -317,16 +335,16 @@ export default function DashboardScreen() {
             </View>
 
             <View style={styles.offerFareRow}>
-              <Text style={styles.offerFareLabel}>Estimated fare</Text>
+              <Text style={styles.offerFareLabel}>{t('estimatedFareLabel')}</Text>
               <Text style={styles.offerFare}>{offer?.fare_estimate}</Text>
             </View>
 
             <View style={styles.offerButtons}>
               <TouchableOpacity style={styles.declineButton} onPress={handleDecline}>
-                <Text style={styles.declineText}>Decline</Text>
+                <Text style={styles.declineText}>{t('decline')}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.acceptButton} onPress={handleAccept}>
-                <Text style={styles.acceptText}>Accept</Text>
+                <Text style={styles.acceptText}>{t('accept')}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -348,6 +366,13 @@ const styles = StyleSheet.create({
   },
   topLogo: { fontSize: 20, fontWeight: '700', color: '#F5A623' },
   driverBadge: { fontSize: 11, color: '#888', fontWeight: '400', letterSpacing: 2 },
+  topActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  langToggle: {
+    backgroundColor: '#1E1E1E', borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 5,
+    borderWidth: 1, borderColor: '#2A2A2A',
+  },
+  langToggleText: { color: '#F5A623', fontSize: 12, fontWeight: '700' },
   signOut: { color: '#555', fontSize: 13 },
   driverMarker: {
     backgroundColor: '#111', borderRadius: 20, padding: 4,
