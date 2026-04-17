@@ -1,18 +1,35 @@
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { LanguageProvider } from '../contexts/LanguageContext';
 
-// Inner component — lives inside AuthProvider so it can call useAuth().
-// Watches for sign-out and redirects to the login screen.
+// Lives inside AuthProvider so it can call useAuth().
+// Watches for sign-out and navigates to login.
+//
+// The `initialized` ref prevents navigating during the very first auth
+// resolution — index.tsx owns that routing decision. AuthGuard only
+// fires on a *subsequent* change (i.e. the user actually signs out while
+// already inside the app), which avoids the "Cannot navigate before
+// navigation has been mounted" error that Expo Router throws when
+// router.replace is called during the initial render cycle.
 function AuthGuard() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const segments = useSegments();
+  const initialized = useRef(false);
 
   useEffect(() => {
     if (loading) return;
+
+    // Skip the very first resolution — index.tsx handles initial routing.
+    if (!initialized.current) {
+      initialized.current = true;
+      return;
+    }
+
+    // Subsequent auth changes: if the user signed out while inside the app,
+    // redirect to login (unless already on an auth or waitlist screen).
     const inAuthGroup = (segments[0] as string) === '(auth)';
     const inWaitlist =
       (segments[0] as string) === 'waitlist' ||
