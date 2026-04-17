@@ -50,6 +50,7 @@ const translations: Record<string, Record<Language, string>> = {
 
   // Explore
   exploreAmman: { en: 'Explore Amman', ar: 'استكشف عمّان' },
+  exploreSubtitle: { en: 'Discover the best of the city', ar: 'اكتشف أفضل ما في المدينة' },
   all: { en: 'All', ar: 'الكل' },
   restaurants: { en: 'Restaurants', ar: 'مطاعم' },
   cafes: { en: 'Cafes', ar: 'مقاهي' },
@@ -102,6 +103,31 @@ const translations: Record<string, Record<Language, string>> = {
   earlyMember: { en: 'Early Member', ar: 'عضو مبكر' },
   setPickupDropoff: { en: 'Set pickup and dropoff', ar: 'حدد نقطة الانطلاق والوجهة' },
   tapMapDest2: { en: 'Tap the map to set your destination.', ar: 'اضغط على الخريطة لتحديد وجهتك.' },
+
+  // Profile
+  profile: { en: 'Profile', ar: 'الملف الشخصي' },
+  memberSince: { en: 'Member since', ar: 'عضو منذ' },
+  earlyMemberTitle: { en: 'Early Member', ar: 'عضو مبكر' },
+  waitlistPosition: { en: 'Waitlist position', ar: 'موقع في قائمة الانتظار' },
+  earlyMemberNote: {
+    en: 'You joined before Wasel launched — exclusive benefits coming soon',
+    ar: 'انضممت قبل إطلاق وصل — مزايا حصرية قادمة قريباً',
+  },
+  language: { en: 'Language', ar: 'اللغة' },
+  english: { en: 'English', ar: 'الإنجليزية' },
+  arabic: { en: 'Arabic', ar: 'العربية' },
+  aboutWasel: { en: 'About Wasel', ar: 'عن وصل' },
+  version: { en: 'Version', ar: 'الإصدار' },
+  signOutConfirm: { en: 'Sign out?', ar: 'تسجيل الخروج؟' },
+  signOutMessage: {
+    en: 'Are you sure you want to sign out?',
+    ar: 'هل أنت متأكد أنك تريد تسجيل الخروج؟',
+  },
+  signOutConfirmBtn: { en: 'Sign Out', ar: 'تسجيل الخروج' },
+
+  // Trip History
+  tripHistory: { en: 'Trip History', ar: 'سجل الرحلات' },
+  noTripsYet: { en: 'No trips yet', ar: 'لا رحلات بعد' },
 };
 
 const LanguageContext = createContext<LanguageContextType>({

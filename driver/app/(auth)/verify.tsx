@@ -23,6 +23,8 @@ export default function DriverVerifyScreen() {
     return () => clearInterval(interval);
   }, []);
 
+  const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
+
   async function handleVerify() {
     if (otp.length < 6) {
       Alert.alert(t('enterCode'));
@@ -30,26 +32,55 @@ export default function DriverVerifyScreen() {
     }
 
     setLoading(true);
-    const { data, error } = await supabase.auth.verifyOtp({
-      phone: phone!,
-      token: otp,
-      type: 'sms',
-    });
-    setLoading(false);
+    try {
+      const res = await fetch(`${API_URL}/api/auth/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, token: otp, role: 'driver' }),
+      });
+      const data = await res.json();
+      setLoading(false);
 
-    if (error) {
-      Alert.alert('Invalid code', 'Please check the code and try again.');
-      return;
+      if (res.status === 403) {
+        Alert.alert(
+          'Account Pending Approval',
+          'Your driver account is under review. Contact Wasel support to get approved.',
+        );
+        await supabase.auth.setSession(data.session);
+        router.replace('/(app)/dashboard');
+        return;
+      }
+
+      if (!res.ok) {
+        Alert.alert('Invalid code', data.error || 'Please check the code and try again.');
+        return;
+      }
+
+      await supabase.auth.setSession({
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      });
+
+      // Driver profiles are created by admin onboarding — do not auto-create here.
+      router.replace('/(app)/dashboard');
+    } catch (err) {
+      setLoading(false);
+      Alert.alert('Error', 'Could not connect to server. Please try again.');
     }
-
-    // Driver profiles are created by admin onboarding — do not auto-create here.
-    router.replace('/(app)/dashboard');
   }
 
   async function handleResend() {
     if (resendTimer > 0) return;
-    const { error } = await supabase.auth.signInWithOtp({ phone: phone! });
-    if (!error) setResendTimer(30);
+    try {
+      const res = await fetch(`${API_URL}/api/auth/send-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      });
+      if (res.ok) setResendTimer(30);
+    } catch (err) {
+      // silently ignore resend errors
+    }
   }
 
   return (

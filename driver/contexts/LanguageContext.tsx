@@ -102,6 +102,34 @@ const translations: Record<string, Record<Language, string>> = {
   earlyMember: { en: 'Early Member', ar: 'عضو مبكر' },
   setPickupDropoff: { en: 'Set pickup and dropoff', ar: 'حدد نقطة الانطلاق والوجهة' },
   tapMapDest2: { en: 'Tap the map to set your destination.', ar: 'اضغط على الخريطة لتحديد وجهتك.' },
+
+  // Driver Tabs & Profile
+  dashboard: { en: 'Dashboard', ar: 'لوحة القيادة' },
+  profile: { en: 'Profile', ar: 'الملف الشخصي' },
+  driverProfile: { en: 'Driver Profile', ar: 'ملف السائق' },
+  driverSince: { en: 'Driver since', ar: 'سائق منذ' },
+  subscriptionTier: { en: 'Subscription Tier', ar: 'مستوى الاشتراك' },
+  silver: { en: 'Silver', ar: 'فضي' },
+  gold: { en: 'Gold', ar: 'ذهبي' },
+  platinum: { en: 'Platinum', ar: 'بلاتيني' },
+  dispatchPriorityNote: {
+    en: 'Your tier determines your dispatch priority in the BMP algorithm',
+    ar: 'يحدد مستواك الأولوية في خوارزمية التوزيع',
+  },
+  vehicle: { en: 'Vehicle', ar: 'المركبة' },
+  vehiclePlate: { en: 'Plate', ar: 'اللوحة' },
+  language: { en: 'Language', ar: 'اللغة' },
+  aboutWaselDriver: { en: 'About Wasel Driver', ar: 'عن وصل سائق' },
+  version: { en: 'Version', ar: 'الإصدار' },
+  signOutConfirm: { en: 'Sign out?', ar: 'تسجيل الخروج؟' },
+  signOutMessage: { en: 'Are you sure you want to sign out?', ar: 'هل أنت متأكد؟' },
+  signOutConfirmBtn: { en: 'Sign Out', ar: 'تسجيل الخروج' },
+  earlyMemberTitle: { en: 'Early Member', ar: 'عضو مبكر' },
+  waitlistPosition: { en: 'Waitlist position', ar: 'موقع في قائمة الانتظار' },
+  earlyMemberNote: {
+    en: 'You joined before Wasel launched — exclusive benefits coming soon',
+    ar: 'انضممت قبل إطلاق وصل — مزايا حصرية قادمة قريباً',
+  },
 };
 
 const LanguageContext = createContext<LanguageContextType>({

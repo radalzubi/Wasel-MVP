@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  Switch, Alert, Vibration, Platform, Modal,
+  Switch, Alert, Vibration, Platform, Modal, Animated,
 } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
@@ -26,9 +26,17 @@ interface TripOffer {
 
 interface LatLng { latitude: number; longitude: number; }
 
+function getTierBadge(tier: number) {
+  switch (tier) {
+    case 2: return { label: 'Gold ⭐', color: '#F5A623', text: '#000' };
+    case 3: return { label: 'Platinum 💎', color: '#8B5CF6', text: '#FFF' };
+    default: return { label: 'Silver', color: '#2A2A2A', text: '#AAA' };
+  }
+}
+
 export default function DashboardScreen() {
-  const { user, signOut } = useAuth();
-  const { t, language, toggleLanguage } = useLanguage();
+  const { user } = useAuth();
+  const { t } = useLanguage();
   const mapRef = useRef<MapView>(null);
 
   const [isOnline, setIsOnline] = useState(false);
@@ -36,7 +44,50 @@ export default function DashboardScreen() {
   const [offer, setOffer] = useState<TripOffer | null>(null);
   const [offerTimer, setOfferTimer] = useState(15);
   const [currentTrip, setCurrentTrip] = useState<{ id: string; status: string } | null>(null);
+  const [subscriptionTier, setSubscriptionTier] = useState<number>(1);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Pulsing animation for urgent timer
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const pulseLoopRef = useRef<Animated.CompositeAnimation | null>(null);
+
+  useEffect(() => {
+    if (offerTimer <= 5 && offer) {
+      pulseLoopRef.current = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, { toValue: 0.4, duration: 300, useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
+        ]),
+      );
+      pulseLoopRef.current.start();
+    } else {
+      pulseLoopRef.current?.stop();
+      pulseAnim.setValue(1);
+    }
+    return () => {
+      pulseLoopRef.current?.stop();
+    };
+  }, [offerTimer <= 5, !!offer]);
+
+  // Fetch driver profile for tier badge
+  useEffect(() => {
+    (async () => {
+      try {
+        const session = await supabase.auth.getSession();
+        const token = session.data.session?.access_token;
+        if (!token) return;
+        const res = await fetch(`${API_URL}/api/drivers/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setSubscriptionTier(data.subscription_tier ?? 1);
+        }
+      } catch {
+        // Non-fatal — tier badge stays at default
+      }
+    })();
+  }, [user]);
 
   // Get location on mount
   useEffect(() => {
@@ -238,6 +289,9 @@ export default function DashboardScreen() {
     in_progress: { labelKey: 'completeTrip', next: 'completed' },
   };
 
+  const tierBadge = getTierBadge(subscriptionTier);
+  const isTimerUrgent = offerTimer <= 5;
+
   return (
     <View style={styles.container}>
       <MapView
@@ -259,16 +313,13 @@ export default function DashboardScreen() {
       {/* Top bar */}
       <SafeAreaView style={styles.topBar} edges={['top']}>
         <View style={styles.topBarInner}>
-          <Text style={styles.topLogo}>
-            وصل <Text style={styles.driverBadge}>Driver</Text>
-          </Text>
-          <View style={styles.topActions}>
-            <TouchableOpacity style={styles.langToggle} onPress={toggleLanguage}>
-              <Text style={styles.langToggleText}>{language === 'en' ? 'AR' : 'EN'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={signOut}>
-              <Text style={styles.signOut}>{t('signOut')}</Text>
-            </TouchableOpacity>
+          <View style={styles.topLogoRow}>
+            <Text style={styles.topLogo}>
+              وصل <Text style={styles.driverBadge}>Driver</Text>
+            </Text>
+            <View style={[styles.tierBadge, { backgroundColor: tierBadge.color }]}>
+              <Text style={[styles.tierBadgeText, { color: tierBadge.text }]}>{tierBadge.label}</Text>
+            </View>
           </View>
         </View>
       </SafeAreaView>
@@ -293,6 +344,9 @@ export default function DashboardScreen() {
             {isOnline && (
               <View style={styles.waitingRow}>
                 <Text style={styles.waitingText}>{t('waitingForTrips')}</Text>
+                <View style={styles.earningsRow}>
+                  <Text style={styles.earningsText}>Today: 0 JD · Trips: 0</Text>
+                </View>
               </View>
             )}
           </>
@@ -317,9 +371,15 @@ export default function DashboardScreen() {
           <View style={styles.offerCard}>
             <View style={styles.offerTimerRow}>
               <Text style={styles.offerTimerLabel}>{t('newTripRequest')}</Text>
-              <View style={[styles.offerTimer, offerTimer <= 5 && styles.offerTimerUrgent]}>
+              <Animated.View
+                style={[
+                  styles.offerTimer,
+                  isTimerUrgent && styles.offerTimerUrgent,
+                  isTimerUrgent && { opacity: pulseAnim },
+                ]}
+              >
                 <Text style={styles.offerTimerText}>{offerTimer}s</Text>
-              </View>
+              </Animated.View>
             </View>
 
             <View style={styles.offerRoute}>
@@ -335,7 +395,12 @@ export default function DashboardScreen() {
             </View>
 
             <View style={styles.offerFareRow}>
-              <Text style={styles.offerFareLabel}>{t('estimatedFareLabel')}</Text>
+              <View>
+                <Text style={styles.offerFareLabel}>{t('estimatedFareLabel')}</Text>
+                {offer?.distance_km && offer.distance_km !== '—' && (
+                  <Text style={styles.offerDistanceText}>{offer.distance_km} km</Text>
+                )}
+              </View>
               <Text style={styles.offerFare}>{offer?.fare_estimate}</Text>
             </View>
 
@@ -364,16 +429,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(10,10,10,0.85)',
     borderRadius: 14, paddingHorizontal: 16, paddingVertical: 10,
   },
+  topLogoRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   topLogo: { fontSize: 20, fontWeight: '700', color: '#F5A623' },
   driverBadge: { fontSize: 11, color: '#888', fontWeight: '400', letterSpacing: 2 },
-  topActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  langToggle: {
-    backgroundColor: '#1E1E1E', borderRadius: 8,
-    paddingHorizontal: 10, paddingVertical: 5,
-    borderWidth: 1, borderColor: '#2A2A2A',
+  tierBadge: {
+    borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3,
   },
-  langToggleText: { color: '#F5A623', fontSize: 12, fontWeight: '700' },
-  signOut: { color: '#555', fontSize: 13 },
+  tierBadgeText: { fontSize: 11, fontWeight: '700' },
   driverMarker: {
     backgroundColor: '#111', borderRadius: 20, padding: 4,
     borderWidth: 1, borderColor: '#333',
@@ -390,6 +452,8 @@ const styles = StyleSheet.create({
   onlineSub: { fontSize: 13, color: '#666' },
   waitingRow: { marginTop: 16, alignItems: 'center' },
   waitingText: { color: '#444', fontSize: 14 },
+  earningsRow: { marginTop: 8 },
+  earningsText: { color: '#333', fontSize: 12, fontWeight: '500' },
   tripActiveLabel: { fontSize: 18, fontWeight: '700', color: '#FFF', marginBottom: 16 },
   tripActionButton: {
     backgroundColor: '#F5A623', borderRadius: 14,
@@ -424,8 +488,9 @@ const styles = StyleSheet.create({
   offerFareRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20,
   },
-  offerFareLabel: { color: '#666', fontSize: 14 },
-  offerFare: { color: '#F5A623', fontSize: 22, fontWeight: '700' },
+  offerFareLabel: { color: '#666', fontSize: 14, marginBottom: 2 },
+  offerDistanceText: { color: '#555', fontSize: 12, marginTop: 2 },
+  offerFare: { color: '#F5A623', fontSize: 26, fontWeight: '700' },
   offerButtons: { flexDirection: 'row', gap: 12 },
   declineButton: {
     flex: 1, borderWidth: 1, borderColor: '#333', borderRadius: 14,

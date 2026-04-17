@@ -146,6 +146,9 @@ export default function ExploreScreen() {
       <SafeAreaView edges={['top']} style={styles.safeTop}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>{t('exploreAmman')}</Text>
+          <Text style={styles.headerSubtitle}>
+            {t('exploreSubtitle')}
+          </Text>
         </View>
 
         {/* Category pills */}
@@ -214,6 +217,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8,
   },
   headerTitle: { fontSize: 26, fontWeight: '700', color: '#FFF' },
+  headerSubtitle: { fontSize: 13, color: '#555', marginTop: 3, fontWeight: '500' },
   pills: {
     paddingHorizontal: 16, paddingVertical: 10, gap: 8,
     flexDirection: 'row',
@@ -240,6 +244,11 @@ const styles = StyleSheet.create({
     borderRadius: 16, padding: 14,
     marginBottom: 10,
     borderWidth: 1, borderColor: '#1E1E1E',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
   cardEmoji: {
     width: 52, height: 52,

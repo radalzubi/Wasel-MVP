@@ -23,6 +23,8 @@ export default function VerifyScreen() {
     return () => clearInterval(interval);
   }, []);
 
+  const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
+
   async function handleVerify() {
     if (otp.length < 6) {
       Alert.alert(t('enterCode'));
@@ -30,26 +32,44 @@ export default function VerifyScreen() {
     }
 
     setLoading(true);
-    const { error } = await supabase.auth.verifyOtp({
-      phone: phone!,
-      token: otp,
-      type: 'sms',
-    });
-    setLoading(false);
+    try {
+      const res = await fetch(`${API_URL}/api/auth/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, token: otp, role: 'rider' }),
+      });
+      const data = await res.json();
+      setLoading(false);
 
-    if (error) {
-      Alert.alert('Invalid code', 'Please check the code and try again.');
-      return;
+      if (!res.ok) {
+        Alert.alert('Invalid code', data.error || 'Please check the code and try again.');
+        return;
+      }
+
+      await supabase.auth.setSession({
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      });
+
+      router.replace('/(app)/home');
+    } catch (err) {
+      setLoading(false);
+      Alert.alert('Error', 'Could not connect to server. Please try again.');
     }
-
-    // Auth state change will trigger redirect via _layout
-    router.replace('/(app)/home');
   }
 
   async function handleResend() {
     if (resendTimer > 0) return;
-    const { error } = await supabase.auth.signInWithOtp({ phone: phone! });
-    if (!error) setResendTimer(30);
+    try {
+      const res = await fetch(`${API_URL}/api/auth/send-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      });
+      if (res.ok) setResendTimer(30);
+    } catch (err) {
+      // silently ignore resend errors
+    }
   }
 
   return (

@@ -24,8 +24,8 @@ interface RiderProfile {
 }
 
 export default function HomeScreen() {
-  const { user, signOut } = useAuth();
-  const { t, language, toggleLanguage } = useLanguage();
+  const { user } = useAuth();
+  const { t } = useLanguage();
   const mapRef = useRef<MapView>(null);
 
   const [location, setLocation] = useState<LatLng | null>(null);
@@ -251,14 +251,6 @@ export default function HomeScreen() {
               </View>
             )}
           </View>
-          <View style={styles.topActions}>
-            <TouchableOpacity style={styles.langToggle} onPress={toggleLanguage}>
-              <Text style={styles.langToggleText}>{language === 'en' ? 'AR' : 'EN'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={signOut}>
-              <Text style={styles.signOut}>{t('signOut')}</Text>
-            </TouchableOpacity>
-          </View>
         </View>
       </SafeAreaView>
 
@@ -266,6 +258,7 @@ export default function HomeScreen() {
       <View style={styles.bottomSheet}>
         {tripStatus === 'idle' ? (
           <>
+            <Text style={styles.sheetGreeting}>Welcome back 👋</Text>
             <Text style={styles.sheetTitle}>{t('whereTo')}</Text>
 
             {/* Pickup input */}
@@ -307,7 +300,7 @@ export default function HomeScreen() {
               disabled={!dropoffCoords}
               activeOpacity={0.85}
             >
-              <Text style={styles.requestButtonText}>{t('requestWasel')}</Text>
+              <Text style={styles.requestButtonText}>🚖 {t('requestWasel')}</Text>
             </TouchableOpacity>
           </>
         ) : (
@@ -363,14 +356,6 @@ const styles = StyleSheet.create({
   },
   earlyBadgeStar: { fontSize: 10 },
   earlyBadgeText: { color: '#F5A623', fontSize: 10, fontWeight: '600' },
-  topActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  langToggle: {
-    backgroundColor: '#1E1E1E', borderRadius: 8,
-    paddingHorizontal: 10, paddingVertical: 5,
-    borderWidth: 1, borderColor: '#2A2A2A',
-  },
-  langToggleText: { color: '#F5A623', fontSize: 12, fontWeight: '700' },
-  signOut: { color: '#555', fontSize: 13 },
   bottomSheet: {
     // Sit on top of the 60px tab bar so content isn't hidden behind it
     position: 'absolute', bottom: 60, left: 0, right: 0,
@@ -381,6 +366,7 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.3, shadowRadius: 10,
     elevation: 10,
   },
+  sheetGreeting: { fontSize: 12, color: '#555', marginBottom: 4, fontWeight: '500' },
   sheetTitle: { fontSize: 20, fontWeight: '700', color: '#FFF', marginBottom: 16 },
   inputRow: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
