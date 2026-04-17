@@ -69,4 +69,69 @@ router.post('/verify', otpLimiter, async (req, res) => {
   res.json({ session: data.session, user: { id: userId, phone, role } });
 });
 
+// POST /api/auth/dev-login — DEV ONLY, never runs in production
+const DEV_USERS = {
+  rider:  { email: 'test-rider@wasel.dev',  password: 'change-me-dev-password', phone: '+96279000001' },
+  driver: { email: 'test-driver@wasel.dev', password: 'change-me-dev-password', phone: '+96279000002' },
+} as const;
+
+router.post('/dev-login', async (req, res) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ error: 'Not found' });
+  }
+
+  const { role } = req.body;
+  if (role !== 'rider' && role !== 'driver') {
+    return res.status(400).json({ error: 'role must be rider or driver' });
+  }
+
+  const creds = DEV_USERS[role];
+
+  // Try signing in — if the test user doesn't exist yet, create them first
+  let { data, error } = await supabase.auth.signInWithPassword({
+    email: creds.email,
+    password: creds.password,
+  });
+
+  if (error) {
+    // First run: create the test user
+    const { error: createErr } = await supabase.auth.admin.createUser({
+      email: creds.email,
+      password: creds.password,
+      email_confirm: true,
+      phone: creds.phone,
+      phone_confirm: true,
+    });
+    if (createErr) return res.status(500).json({ error: createErr.message });
+
+    ({ data, error } = await supabase.auth.signInWithPassword({
+      email: creds.email,
+      password: creds.password,
+    }));
+  }
+
+  if (error || !data.session) {
+    return res.status(500).json({ error: error?.message || 'Dev login failed' });
+  }
+
+  const userId = data.user!.id;
+
+  // Ensure the profile row exists
+  if (role === 'rider') {
+    await supabase.from('riders').upsert({ id: userId, phone: creds.phone }, { onConflict: 'id' });
+  } else {
+    await supabase.from('drivers').upsert({
+      id: userId,
+      phone: creds.phone,
+      name: 'Test Driver',
+      vehicle_make: 'Toyota',
+      vehicle_model: 'Corolla',
+      vehicle_plate: 'TEST-001',
+      subscription_tier: 2,
+    }, { onConflict: 'id' });
+  }
+
+  res.json({ session: data.session, user: { id: userId, phone: creds.phone, role } });
+});
+
 export default router;

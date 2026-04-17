@@ -6,9 +6,33 @@ import {
 import { router } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
+
 export default function DriverLoginScreen() {
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
+  const [devLoading, setDevLoading] = useState(false);
+
+  async function handleDevLogin() {
+    setDevLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/api/auth/dev-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: 'driver' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Dev login failed');
+      await supabase.auth.setSession({
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      });
+    } catch (err: unknown) {
+      Alert.alert('Dev login failed', err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setDevLoading(false);
+    }
+  }
 
   async function handleSendOTP() {
     const cleaned = phone.trim();
@@ -76,6 +100,20 @@ export default function DriverLoginScreen() {
         <Text style={styles.disclaimer}>
           Driver accounts are subject to approval
         </Text>
+
+        {__DEV__ && (
+          <TouchableOpacity
+            style={styles.devButton}
+            onPress={handleDevLogin}
+            disabled={devLoading}
+            activeOpacity={0.7}
+          >
+            {devLoading
+              ? <ActivityIndicator color="#F5A623" size="small" />
+              : <Text style={styles.devButtonText}>⚡ Dev: Skip Auth (Driver)</Text>
+            }
+          </TouchableOpacity>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -121,4 +159,14 @@ const styles = StyleSheet.create({
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: '#000', fontWeight: '700', fontSize: 17 },
   disclaimer: { color: '#444', fontSize: 12, textAlign: 'center', marginTop: 20 },
+  devButton: {
+    marginTop: 24,
+    borderWidth: 1,
+    borderColor: '#F5A623',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    opacity: 0.7,
+  },
+  devButtonText: { color: '#F5A623', fontSize: 13, fontWeight: '600' },
 });
