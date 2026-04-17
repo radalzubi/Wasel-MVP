@@ -137,7 +137,25 @@ export default function HomeScreen() {
     }
   }
 
-  function handleCancelTrip() {
+  async function handleCancelTrip() {
+    if (tripId) {
+      try {
+        const session = await supabase.auth.getSession();
+        const token = session.data.session?.access_token;
+        if (token) {
+          await fetch(`${API_URL}/api/trips/${tripId}/status`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+            body: JSON.stringify({ status: 'cancelled' }),
+          });
+        }
+      } catch {
+        // UI always resets regardless of network error
+      }
+    }
     setTripStatus('idle');
     setTripId(null);
     setDriverLocation(null);

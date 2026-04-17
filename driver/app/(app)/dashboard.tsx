@@ -54,17 +54,22 @@ export default function DashboardScreen() {
     if (!isOnline || !user) return;
 
     const interval = setInterval(async () => {
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
-      setLocation(coords);
+      try {
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+        setLocation(coords);
 
-      const session = await supabase.auth.getSession();
-      const token = session.data.session?.access_token;
-      await fetch(`${API_URL}/api/drivers/location`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ lat: coords.latitude, lng: coords.longitude }),
-      });
+        const session = await supabase.auth.getSession();
+        const token = session.data.session?.access_token;
+        if (!token) return;
+        await fetch(`${API_URL}/api/drivers/location`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ lat: coords.latitude, lng: coords.longitude }),
+        });
+      } catch {
+        // Non-fatal: skip this ping, try again next interval
+      }
     }, 10000);
 
     return () => clearInterval(interval);
@@ -87,7 +92,7 @@ export default function DashboardScreen() {
         // Fetch trip details
         const { data: trip } = await supabase
           .from('trips')
-          .select('pickup_address, dropoff_address, pickup_location, dropoff_location, fare_amount')
+          .select('pickup_address, dropoff_address, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, fare_amount')
           .eq('id', offerData.trip_id)
           .single();
 
@@ -98,8 +103,8 @@ export default function DashboardScreen() {
             trip_id: offerData.trip_id,
             pickup_address: trip.pickup_address || 'Pickup location',
             dropoff_address: trip.dropoff_address || 'Dropoff location',
-            pickup_lat: 0,
-            pickup_lng: 0,
+            pickup_lat: trip.pickup_lat ?? 0,
+            pickup_lng: trip.pickup_lng ?? 0,
             fare_estimate: trip.fare_amount ? `${trip.fare_amount} JD` : '~2-5 JD',
             distance_km: '—',
           });
@@ -111,14 +116,19 @@ export default function DashboardScreen() {
     return () => { supabase.removeChannel(channel); };
   }, [user]);
 
-  // Offer countdown timer
+  // Offer countdown timer — always clear existing interval before starting a new one
   useEffect(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
     if (!offer) return;
 
     timerRef.current = setInterval(() => {
       setOfferTimer((t) => {
         if (t <= 1) {
           clearInterval(timerRef.current!);
+          timerRef.current = null;
           setOffer(null);
           return 0;
         }
@@ -126,7 +136,12 @@ export default function DashboardScreen() {
       });
     }, 1000);
 
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
   }, [offer]);
 
   async function toggleOnline(value: boolean) {
@@ -143,19 +158,31 @@ export default function DashboardScreen() {
 
   async function handleAccept() {
     if (!offer) return;
-    clearInterval(timerRef.current!);
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
 
-    const session = await supabase.auth.getSession();
-    const token = session.data.session?.access_token;
+    try {
+      const session = await supabase.auth.getSession();
+      const token = session.data.session?.access_token;
+      if (!token) throw new Error('No session');
 
-    const res = await fetch(`${API_URL}/api/trips/${offer.trip_id}/accept`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
-    });
+      const res = await fetch(`${API_URL}/api/trips/${offer.trip_id}/accept`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
 
-    if (res.ok) {
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+
       setCurrentTrip({ id: offer.trip_id, status: 'accepted' });
       setOffer(null);
+    } catch (err: unknown) {
+      Alert.alert('Could not accept trip', err instanceof Error ? err.message : 'Please try again.');
+      setOffer(null); // dismiss offer — it may have expired
     }
   }
 
@@ -167,19 +194,29 @@ export default function DashboardScreen() {
   async function advanceTripStatus(nextStatus: string) {
     if (!currentTrip) return;
 
-    const session = await supabase.auth.getSession();
-    const token = session.data.session?.access_token;
+    try {
+      const session = await supabase.auth.getSession();
+      const token = session.data.session?.access_token;
+      if (!token) throw new Error('No session');
 
-    await fetch(`${API_URL}/api/trips/${currentTrip.id}/status`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ status: nextStatus }),
-    });
+      const res = await fetch(`${API_URL}/api/trips/${currentTrip.id}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ status: nextStatus }),
+      });
 
-    if (nextStatus === 'completed') {
-      setCurrentTrip(null);
-    } else {
-      setCurrentTrip({ ...currentTrip, status: nextStatus });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+
+      if (nextStatus === 'completed') {
+        setCurrentTrip(null);
+      } else {
+        setCurrentTrip({ ...currentTrip, status: nextStatus });
+      }
+    } catch (err: unknown) {
+      Alert.alert('Status update failed', err instanceof Error ? err.message : 'Please try again.');
     }
   }
 

@@ -4,8 +4,29 @@ import { bmpScore, DriverCandidate } from './scoring';
 
 const OFFER_TIMEOUT_SECONDS = 15;
 const MAX_SEARCH_RADIUS_KM = 10;
+const MAX_DISPATCH_ROUNDS = 5; // prevent infinite loop if many drivers decline
 
-export async function dispatchTrip(tripId: string, pickupLat: number, pickupLng: number): Promise<string | null> {
+export async function dispatchTrip(
+  tripId: string,
+  pickupLat: number,
+  pickupLng: number,
+  round = 0,
+): Promise<string | null> {
+  // Safety valve: cancel after too many failed rounds
+  if (round >= MAX_DISPATCH_ROUNDS) {
+    await supabase.from('trips').update({ status: 'cancelled' }).eq('id', tripId);
+    return null;
+  }
+
+  // Determine which drivers already received an offer for this trip (skip them)
+  const { data: previousOffers } = await supabase
+    .from('trip_offers')
+    .select('driver_id')
+    .eq('trip_id', tripId);
+
+  const alreadyOffered = new Set((previousOffers || []).map((o) => o.driver_id));
+
+  // Re-query live availability every round so driver status is fresh
   const { data: drivers, error } = await supabase
     .from('drivers')
     .select('id, current_location, subscription_tier, activity_score, idle_time_minutes')
@@ -17,9 +38,10 @@ export async function dispatchTrip(tripId: string, pickupLat: number, pickupLng:
     return null;
   }
 
-  type ScoredDriver = { driverId: string; score: number; distKm: number };
+  type ScoredDriver = { driverId: string; score: number };
 
   const scored: ScoredDriver[] = drivers
+    .filter((d) => !alreadyOffered.has(d.id))
     .map((d) => {
       const coords = d.current_location?.coordinates as [number, number] | undefined;
       if (!coords) return null;
@@ -29,12 +51,12 @@ export async function dispatchTrip(tripId: string, pickupLat: number, pickupLng:
 
       const candidate: DriverCandidate = {
         id: d.id,
-        subscription_tier: d.subscription_tier as 1 | 2 | 3,
+        subscription_tier: ((d.subscription_tier ?? 1) as 1 | 2 | 3),
         activity_score: d.activity_score ?? 0.5,
         idle_time_minutes: d.idle_time_minutes ?? 0,
       };
 
-      return { driverId: d.id, score: bmpScore(candidate, distKm), distKm };
+      return { driverId: d.id, score: bmpScore(candidate, distKm) };
     })
     .filter((d): d is ScoredDriver => d !== null)
     .sort((a, b) => b.score - a.score);
@@ -60,7 +82,7 @@ export async function dispatchTrip(tripId: string, pickupLat: number, pickupLng:
     expires_at: expiresAt,
   });
 
-  // Auto-expire and log if not accepted
+  // Auto-expire and recursively re-dispatch if the driver doesn't respond
   setTimeout(async () => {
     const { data: offer } = await supabase
       .from('trip_offers')
@@ -75,21 +97,10 @@ export async function dispatchTrip(tripId: string, pickupLat: number, pickupLng:
         .eq('trip_id', tripId)
         .eq('driver_id', winner.driverId);
 
-      // Re-dispatch to next available candidate (skip winner)
-      const nextCandidate = scored[1];
-      if (nextCandidate) {
-        await redispatch(tripId, nextCandidate.driverId);
-      } else {
-        await supabase.from('trips').update({ status: 'cancelled' }).eq('id', tripId);
-      }
+      // Next round: re-query fresh availability, skip all previously offered drivers
+      dispatchTrip(tripId, pickupLat, pickupLng, round + 1).catch(console.error);
     }
   }, OFFER_TIMEOUT_SECONDS * 1000);
 
   return winner.driverId;
-}
-
-async function redispatch(tripId: string, driverId: string) {
-  const expiresAt = new Date(Date.now() + OFFER_TIMEOUT_SECONDS * 1000).toISOString();
-  await supabase.from('trips').update({ driver_id: driverId }).eq('id', tripId);
-  await supabase.from('trip_offers').insert({ trip_id: tripId, driver_id: driverId, expires_at: expiresAt });
 }

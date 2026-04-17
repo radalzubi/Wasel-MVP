@@ -11,6 +11,9 @@ router.patch('/location', requireAuth, async (req: AuthRequest, res) => {
   if (typeof lat !== 'number' || typeof lng !== 'number') {
     return res.status(400).json({ error: 'lat and lng required' });
   }
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    return res.status(400).json({ error: 'Invalid coordinates' });
+  }
 
   const { error } = await supabase
     .from('drivers')
