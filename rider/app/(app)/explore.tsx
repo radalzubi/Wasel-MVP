@@ -4,6 +4,7 @@ import {
   RefreshControl, ScrollView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { supabase } from '../../lib/supabase';
 
@@ -19,7 +20,7 @@ interface Place {
   address?: string;
   address_ar?: string;
   category: string;
-  image_emoji?: string;
+  image_emoji?: string; // kept for API compatibility, not rendered
   rating?: number;
   price_range?: string; // e.g. '$', '$$', '$$$', 'Free'
 }
@@ -31,6 +32,16 @@ const CATEGORIES: { key: Category; labelKey: string }[] = [
   { key: 'landmark',   labelKey: 'landmarks' },
   { key: 'shopping',   labelKey: 'shopping' },
 ];
+
+function getCategoryIcon(category: string): string {
+  switch (category) {
+    case 'restaurant': return 'restaurant-outline';
+    case 'cafe':       return 'cafe-outline';
+    case 'landmark':   return 'business-outline';
+    case 'shopping':   return 'bag-outline';
+    default:           return 'location-outline';
+  }
+}
 
 function StarRating({ rating }: { rating: number }) {
   return (
@@ -124,8 +135,8 @@ export default function ExploreScreen() {
   function renderPlace({ item }: { item: Place }) {
     return (
       <View style={styles.card}>
-        <View style={styles.cardEmoji}>
-          <Text style={styles.cardEmojiText}>{item.image_emoji || '📍'}</Text>
+        <View style={styles.cardIcon}>
+          <Ionicons name={getCategoryIcon(item.category) as any} size={22} color="#F5A623" />
         </View>
         <View style={styles.cardContent}>
           <Text style={styles.cardName} numberOfLines={1}>{getPlaceName(item)}</Text>
@@ -146,9 +157,7 @@ export default function ExploreScreen() {
       <SafeAreaView edges={['top']} style={styles.safeTop}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>{t('exploreAmman')}</Text>
-          <Text style={styles.headerSubtitle}>
-            {t('exploreSubtitle')}
-          </Text>
+          <Text style={styles.headerSubtitle}>{t('exploreSubtitle')}</Text>
         </View>
 
         {/* Category pills */}
@@ -217,7 +226,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8,
   },
   headerTitle: { fontSize: 26, fontWeight: '700', color: '#FFF' },
-  headerSubtitle: { fontSize: 13, color: '#555', marginTop: 3, fontWeight: '500' },
+  headerSubtitle: { fontSize: 13, color: '#555', marginTop: 4 },
   pills: {
     paddingHorizontal: 16, paddingVertical: 10, gap: 8,
     flexDirection: 'row',
@@ -250,13 +259,12 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 5,
   },
-  cardEmoji: {
+  cardIcon: {
     width: 52, height: 52,
     backgroundColor: '#1A1A1A', borderRadius: 14,
     alignItems: 'center', justifyContent: 'center',
     borderWidth: 1, borderColor: '#2A2A2A',
   },
-  cardEmojiText: { fontSize: 26 },
   cardContent: { flex: 1, gap: 4 },
   cardName: { color: '#FFF', fontSize: 15, fontWeight: '600' },
   cardAddress: { color: '#666', fontSize: 12 },

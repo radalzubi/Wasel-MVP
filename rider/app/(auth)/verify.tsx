@@ -3,6 +3,7 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ActivityIndicator, Alert, KeyboardAvoidingView, Platform,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { useLanguage } from '../../contexts/LanguageContext';
@@ -79,7 +80,7 @@ export default function VerifyScreen() {
     >
       <View style={styles.inner}>
         <TouchableOpacity style={styles.back} onPress={() => router.back()}>
-          <Text style={styles.backText}>{t('back')}</Text>
+          <Ionicons name="arrow-back" size={20} color="#F5A623" />
         </TouchableOpacity>
 
         <Text style={styles.title}>{t('enterCode')}</Text>
@@ -133,7 +134,6 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0A0A0A' },
   inner: { flex: 1, padding: 28, justifyContent: 'center' },
   back: { position: 'absolute', top: 60, left: 28 },
-  backText: { color: '#F5A623', fontSize: 16 },
   title: { fontSize: 28, fontWeight: '700', color: '#FFF', marginBottom: 8 },
   subtitle: { fontSize: 14, color: '#666', marginBottom: 40 },
   otpInput: {

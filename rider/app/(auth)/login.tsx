@@ -57,7 +57,7 @@ export default function LoginScreen() {
 
         <View style={styles.inputRow}>
           <View style={styles.countryCode}>
-            <Text style={styles.countryCodeText}>🇯🇴 +962</Text>
+            <Text style={styles.countryCodeText}>+962</Text>
           </View>
           <TextInput
             style={styles.input}

@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  ActivityIndicator, Alert, ScrollView, Platform,
+  Alert, ScrollView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { supabase } from '../../lib/supabase';
@@ -20,12 +21,9 @@ interface RiderProfile {
 }
 
 function formatPhone(raw: string): string {
-  // Normalize: strip all non-digit characters except leading +
   const cleaned = raw.replace(/[^\d+]/g, '');
-  // If it starts with +9627x, format as +962 7X XXX XXXX
   const m = cleaned.match(/^\+962(\d)(\d{3})(\d{4})$/);
   if (m) return `+962 ${m[1]}${m[2]} ${m[3]}`;
-  // Fallback: just return as-is
   return raw;
 }
 
@@ -50,6 +48,44 @@ function SkeletonBlock({ width, height, style }: { width: number | string; heigh
   );
 }
 
+// ── SettingsRow ──────────────────────────────────────────────────────────────
+interface RowProps {
+  icon: string;
+  label: string;
+  value?: string;
+  chevron?: boolean;
+  onPress?: () => void;
+  iconColor?: string;
+  children?: React.ReactNode;
+}
+
+function SettingsRow({ icon, label, value, chevron = false, onPress, iconColor = '#888', children }: RowProps) {
+  const content = (
+    <View style={styles.row}>
+      <View style={styles.rowIcon}>
+        <Ionicons name={icon as any} size={18} color={iconColor} />
+      </View>
+      <View style={styles.rowBody}>
+        <Text style={styles.rowLabel}>{label}</Text>
+        {children ? <View style={styles.rowChildren}>{children}</View> : null}
+      </View>
+      <View style={styles.rowRight}>
+        {value ? <Text style={styles.rowValue}>{value}</Text> : null}
+        {chevron ? <Ionicons name="chevron-forward" size={16} color="#444" /> : null}
+      </View>
+    </View>
+  );
+  if (onPress) {
+    return (
+      <TouchableOpacity onPress={onPress} activeOpacity={0.7}>
+        {content}
+      </TouchableOpacity>
+    );
+  }
+  return content;
+}
+
+// ── Main Screen ──────────────────────────────────────────────────────────────
 export default function ProfileScreen() {
   const { user, signOut } = useAuth();
   const { t, language, toggleLanguage } = useLanguage();
@@ -58,7 +94,6 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
 
-  // Derive phone from Supabase user as fallback
   const fallbackPhone: string =
     user?.phone ?? user?.user_metadata?.phone ?? '';
 
@@ -99,7 +134,6 @@ export default function ProfileScreen() {
     );
   }
 
-  // Resolved display values
   const displayPhone = profile?.phone ?? fallbackPhone;
   const displayCreatedAt = profile?.created_at ?? user?.created_at ?? '';
   const isEarlyMember = profile?.is_waitlist_member ?? false;
@@ -112,12 +146,12 @@ export default function ProfileScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
+        {/* ── Page Header ── */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>{t('profile')}</Text>
+          <Text style={styles.headerTitle}>{t('settings')}</Text>
         </View>
 
-        {/* Avatar + identity */}
+        {/* ── Avatar + identity ── */}
         <View style={styles.avatarSection}>
           <View style={styles.avatarCircle}>
             <Text style={styles.avatarText}>
@@ -144,11 +178,11 @@ export default function ProfileScreen() {
           )}
         </View>
 
-        {/* Early Member Badge */}
+        {/* ── Early Member Badge ── */}
         {!loading && isEarlyMember && (
           <View style={styles.earlyCard}>
             <View style={styles.earlyCardHeader}>
-              <Text style={styles.earlyCardStar}>⭐</Text>
+              <Ionicons name="star" size={20} color="#F5A623" />
               <View style={styles.earlyCardTitles}>
                 <Text style={styles.earlyCardTitle}>{t('earlyMemberTitle')}</Text>
                 {waitlistPosition != null && (
@@ -162,7 +196,7 @@ export default function ProfileScreen() {
           </View>
         )}
 
-        {/* Skeleton for early card while loading */}
+        {/* Skeleton placeholder for early card area while loading */}
         {loading && (
           <View style={styles.skeletonCard}>
             <SkeletonBlock width={40} height={40} style={{ borderRadius: 20 }} />
@@ -173,45 +207,135 @@ export default function ProfileScreen() {
           </View>
         )}
 
-        {/* Settings Section */}
+        {/* ── ACCOUNT ── */}
+        <Text style={styles.sectionHeader}>ACCOUNT</Text>
         <View style={styles.section}>
-          {/* Language row */}
-          <TouchableOpacity
-            style={styles.row}
-            onPress={toggleLanguage}
-            activeOpacity={0.75}
-          >
-            <View style={styles.rowLeft}>
-              <View style={styles.rowIcon}>
-                <Text style={styles.rowIconText}>🌐</Text>
-              </View>
-              <Text style={styles.rowLabel}>{t('language')}</Text>
-            </View>
-            <View style={styles.rowRight}>
-              <Text style={styles.rowValue}>
-                {language === 'en' ? t('english') : t('arabic')}
-              </Text>
-              <Text style={styles.rowChevron}>›</Text>
-            </View>
-          </TouchableOpacity>
-
+          <SettingsRow
+            icon="person-outline"
+            label="Display name"
+            value={user?.user_metadata?.full_name || 'Not set'}
+            chevron
+            onPress={() => Alert.alert('Display Name', 'Coming soon')}
+          />
           <View style={styles.rowDivider} />
-
-          {/* About Wasel row */}
-          <View style={[styles.row, styles.rowNoAction]}>
-            <View style={styles.rowLeft}>
-              <View style={styles.rowIcon}>
-                <Text style={styles.rowIconText}>ℹ️</Text>
-              </View>
-              <Text style={styles.rowLabel}>{t('aboutWasel')}</Text>
-            </View>
-            <View style={styles.rowRight}>
-              <Text style={styles.rowValue}>{t('version')} 1.0.0</Text>
-            </View>
-          </View>
+          <SettingsRow
+            icon="call-outline"
+            label="Phone number"
+            value={displayPhone ? formatPhone(displayPhone) : '—'}
+          />
         </View>
 
-        {/* Sign Out */}
+        {/* ── TRAVEL ── */}
+        <Text style={styles.sectionHeader}>TRAVEL</Text>
+        <View style={styles.section}>
+          <SettingsRow
+            icon="bookmark-outline"
+            label="Saved places"
+            chevron
+            onPress={() => Alert.alert('Saved Places', 'Saved places coming soon')}
+          >
+            <View style={styles.chipsRow}>
+              <View style={styles.chip}><Text style={styles.chipText}>Home</Text></View>
+              <View style={styles.chip}><Text style={styles.chipText}>Work</Text></View>
+            </View>
+          </SettingsRow>
+        </View>
+
+        {/* ── PAYMENTS ── */}
+        <Text style={styles.sectionHeader}>PAYMENTS</Text>
+        <View style={styles.section}>
+          <SettingsRow
+            icon="card-outline"
+            label="Payment methods"
+            value="Cash"
+            chevron
+            onPress={() => Alert.alert('Payment Methods', 'Card payments coming soon')}
+          />
+        </View>
+
+        {/* ── TRIPS ── */}
+        <Text style={styles.sectionHeader}>TRIPS</Text>
+        <View style={styles.section}>
+          <SettingsRow
+            icon="time-outline"
+            label="Trip history"
+            chevron
+            onPress={() => Alert.alert('Trip History', 'Trip history coming soon')}
+          />
+        </View>
+
+        {/* ── PREFERENCES ── */}
+        <Text style={styles.sectionHeader}>PREFERENCES</Text>
+        <View style={styles.section}>
+          <SettingsRow
+            icon="notifications-outline"
+            label="Notifications"
+            chevron
+            onPress={() => Alert.alert('Notifications', 'Notification settings coming soon')}
+          />
+          <View style={styles.rowDivider} />
+          <SettingsRow
+            icon="language-outline"
+            label="Language"
+            value={language === 'en' ? 'English' : 'العربية'}
+            chevron
+            onPress={toggleLanguage}
+          />
+        </View>
+
+        {/* ── HELP & SUPPORT ── */}
+        <Text style={styles.sectionHeader}>HELP & SUPPORT</Text>
+        <View style={styles.section}>
+          <SettingsRow
+            icon="help-circle-outline"
+            label="FAQ"
+            chevron
+            onPress={() => Alert.alert('FAQ', 'FAQ coming soon')}
+          />
+          <View style={styles.rowDivider} />
+          <SettingsRow
+            icon="chatbubble-outline"
+            label="Contact support"
+            chevron
+            onPress={() => Alert.alert('Contact Support', 'Opens email/chat: support@wasel.jo')}
+          />
+        </View>
+
+        {/* ── SAFETY ── */}
+        <Text style={styles.sectionHeader}>SAFETY</Text>
+        <View style={styles.section}>
+          <SettingsRow
+            icon="shield-outline"
+            label="Emergency contact"
+            chevron
+            onPress={() => Alert.alert('Emergency Contact', 'Emergency contact coming soon')}
+          />
+        </View>
+
+        {/* ── LEGAL ── */}
+        <Text style={styles.sectionHeader}>LEGAL</Text>
+        <View style={styles.section}>
+          <SettingsRow
+            icon="document-text-outline"
+            label="Privacy policy"
+            chevron
+            onPress={() => Alert.alert('Privacy Policy', 'https://wasel.jo/privacy')}
+          />
+          <View style={styles.rowDivider} />
+          <SettingsRow
+            icon="document-text-outline"
+            label="Terms of service"
+            chevron
+            onPress={() => Alert.alert('Terms of Service', 'https://wasel.jo/terms')}
+          />
+        </View>
+
+        {/* ── About row (standalone) ── */}
+        <View style={styles.aboutRow}>
+          <Text style={styles.aboutText}>Wasel · Version 1.0.0</Text>
+        </View>
+
+        {/* ── Sign Out ── */}
         <TouchableOpacity
           style={styles.signOutButton}
           onPress={handleSignOut}
@@ -224,6 +348,7 @@ export default function ProfileScreen() {
   );
 }
 
+// ── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
@@ -234,10 +359,10 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 20,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 32,
+    paddingBottom: Platform.OS === 'ios' ? 48 : 36,
   },
 
-  // Header
+  // ── Header ──
   header: {
     paddingTop: 12,
     paddingBottom: 8,
@@ -248,7 +373,7 @@ const styles = StyleSheet.create({
     color: '#FFF',
   },
 
-  // Avatar section
+  // ── Avatar section ──
   avatarSection: {
     alignItems: 'center',
     paddingVertical: 28,
@@ -285,14 +410,14 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
 
-  // Early member card
+  // ── Early member card ──
   earlyCard: {
     backgroundColor: 'rgba(245,166,35,0.06)',
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(245,166,35,0.35)',
     padding: 16,
-    marginBottom: 20,
+    marginBottom: 24,
     shadowColor: '#F5A623',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.15,
@@ -304,9 +429,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     marginBottom: 10,
-  },
-  earlyCardStar: {
-    fontSize: 28,
   },
   earlyCardTitles: {
     flex: 1,
@@ -327,7 +449,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 
-  // Skeleton card placeholder
+  // ── Skeleton card ──
   skeletonCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -335,31 +457,38 @@ const styles = StyleSheet.create({
     backgroundColor: '#111',
     borderRadius: 16,
     padding: 16,
-    marginBottom: 20,
+    marginBottom: 24,
     borderWidth: 1,
     borderColor: '#1E1E1E',
   },
 
-  // Settings section
+  // ── Section header label ──
+  sectionHeader: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#555',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+    marginLeft: 4,
+  },
+
+  // ── Section card ──
   section: {
     backgroundColor: '#111',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#2A2A2A',
+    borderColor: '#1E1E1E',
     marginBottom: 20,
     overflow: 'hidden',
   },
+
+  // ── Row ──
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 16,
-  },
-  rowNoAction: {},
-  rowLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    paddingVertical: 14,
     gap: 12,
   },
   rowIcon: {
@@ -371,36 +500,68 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: '#2A2A2A',
+    flexShrink: 0,
   },
-  rowIconText: {
-    fontSize: 16,
+  rowBody: {
+    flex: 1,
+    justifyContent: 'center',
+    gap: 4,
   },
   rowLabel: {
     fontSize: 15,
     color: '#FFF',
     fontWeight: '500',
   },
+  rowChildren: {
+    marginTop: 4,
+  },
   rowRight: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    flexShrink: 0,
   },
   rowValue: {
     fontSize: 13,
     color: '#666',
   },
-  rowChevron: {
-    fontSize: 20,
-    color: '#444',
-    lineHeight: 22,
-  },
   rowDivider: {
     height: 1,
-    backgroundColor: '#1E1E1E',
-    marginHorizontal: 16,
+    backgroundColor: '#1A1A1A',
+    marginLeft: 52,
   },
 
-  // Sign out
+  // ── Chips (Saved Places) ──
+  chipsRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  chip: {
+    backgroundColor: '#1E1E1E',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+  },
+  chipText: {
+    fontSize: 11,
+    color: '#888',
+    fontWeight: '500',
+  },
+
+  // ── About row ──
+  aboutRow: {
+    alignItems: 'center',
+    paddingVertical: 16,
+    marginBottom: 8,
+  },
+  aboutText: {
+    fontSize: 13,
+    color: '#333',
+  },
+
+  // ── Sign out ──
   signOutButton: {
     backgroundColor: 'rgba(220,53,69,0.12)',
     borderWidth: 1,

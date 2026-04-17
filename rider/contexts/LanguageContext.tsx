@@ -26,7 +26,7 @@ const translations: Record<string, Record<Language, string>> = {
   resendCode: { en: 'Resend code', ar: 'إعادة إرسال الرمز' },
   resendIn: { en: 'Resend code in', ar: 'إعادة الإرسال خلال' },
   seconds: { en: 's', ar: 'ث' },
-  back: { en: '← Back', ar: 'رجوع →' },
+  back: { en: 'Back', ar: 'رجوع' },
 
   // Home
   whereTo: { en: 'Where to?', ar: 'إلى أين؟' },
@@ -42,14 +42,14 @@ const translations: Record<string, Record<Language, string>> = {
   // Trip status
   findingDrivers: { en: 'Finding drivers...', ar: 'جاري البحث عن سائقين...' },
   contactingDriver: { en: 'Contacting driver...', ar: 'جاري التواصل مع السائق...' },
-  driverAccepted: { en: 'Driver accepted!', ar: 'قبل السائق الرحلة!' },
+  driverAccepted: { en: 'Driver accepted', ar: 'قبل السائق الرحلة' },
   driverOnWay: { en: 'Driver on the way', ar: 'السائق في الطريق' },
   driverArrived: { en: 'Driver has arrived', ar: 'وصل السائق' },
   tripInProgress: { en: 'Trip in progress', ar: 'الرحلة جارية' },
-  tripComplete: { en: 'Trip complete! 🎉', ar: '!اكتملت الرحلة 🎉' },
+  tripComplete: { en: 'Trip complete', ar: 'اكتملت الرحلة' },
 
   // Explore
-  exploreAmman: { en: 'Explore Amman', ar: 'استكشف عمّان' },
+  exploreAmman: { en: 'Explore', ar: 'استكشف' },
   exploreSubtitle: { en: 'Discover the best of the city', ar: 'اكتشف أفضل ما في المدينة' },
   all: { en: 'All', ar: 'الكل' },
   restaurants: { en: 'Restaurants', ar: 'مطاعم' },
@@ -84,8 +84,8 @@ const translations: Record<string, Record<Language, string>> = {
   keepEarnings: { en: 'You keep earnings', ar: 'أرباحك لك' },
 
   // Driver Dashboard
-  online: { en: '🟢 Online', ar: '🟢 متصل' },
-  offline: { en: '⚫ Offline', ar: '⚫ غير متصل' },
+  online: { en: 'Online', ar: 'متصل' },
+  offline: { en: 'Offline', ar: 'غير متصل' },
   acceptingTrips: { en: 'Accepting trips', ar: 'قبول الرحلات' },
   goOnlineMsg: { en: 'Go online to receive trips', ar: 'اتصل لاستقبال الرحلات' },
   waitingForTrips: { en: 'Waiting for trips...', ar: 'في انتظار الرحلات...' },
@@ -104,8 +104,22 @@ const translations: Record<string, Record<Language, string>> = {
   setPickupDropoff: { en: 'Set pickup and dropoff', ar: 'حدد نقطة الانطلاق والوجهة' },
   tapMapDest2: { en: 'Tap the map to set your destination.', ar: 'اضغط على الخريطة لتحديد وجهتك.' },
 
-  // Profile
+  // Profile / Settings
   profile: { en: 'Profile', ar: 'الملف الشخصي' },
+  settings: { en: 'Settings', ar: 'الإعدادات' },
+  displayName: { en: 'Display name', ar: 'الاسم المعروض' },
+  savedPlaces: { en: 'Saved places', ar: 'الأماكن المحفوظة' },
+  paymentMethods: { en: 'Payment methods', ar: 'طرق الدفع' },
+  notifications: { en: 'Notifications', ar: 'الإشعارات' },
+  helpSupport: { en: 'Help & support', ar: 'المساعدة والدعم' },
+  faq: { en: 'FAQ', ar: 'الأسئلة الشائعة' },
+  contactSupport: { en: 'Contact support', ar: 'تواصل مع الدعم' },
+  safetyTitle: { en: 'Safety', ar: 'السلامة' },
+  emergencyContact: { en: 'Emergency contact', ar: 'جهة اتصال الطوارئ' },
+  privacyPolicy: { en: 'Privacy policy', ar: 'سياسة الخصوصية' },
+  termsOfService: { en: 'Terms of service', ar: 'شروط الخدمة' },
+  comingSoon: { en: 'Coming soon', ar: 'قريباً' },
+  notSet: { en: 'Not set', ar: 'غير محدد' },
   memberSince: { en: 'Member since', ar: 'عضو منذ' },
   earlyMemberTitle: { en: 'Early Member', ar: 'عضو مبكر' },
   waitlistPosition: { en: 'Waitlist position', ar: 'موقع في قائمة الانتظار' },
@@ -126,7 +140,7 @@ const translations: Record<string, Record<Language, string>> = {
   signOutConfirmBtn: { en: 'Sign Out', ar: 'تسجيل الخروج' },
 
   // Trip History
-  tripHistory: { en: 'Trip History', ar: 'سجل الرحلات' },
+  tripHistory: { en: 'Trip history', ar: 'سجل الرحلات' },
   noTripsYet: { en: 'No trips yet', ar: 'لا رحلات بعد' },
 };
 

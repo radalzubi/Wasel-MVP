@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  ActivityIndicator, Alert, Keyboard, Platform,
+  ActivityIndicator, Alert, Keyboard, Animated,
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { supabase } from '../../lib/supabase';
@@ -27,7 +28,6 @@ export default function HomeScreen() {
   const { user } = useAuth();
   const { t } = useLanguage();
   const mapRef = useRef<MapView>(null);
-
   const [location, setLocation] = useState<LatLng | null>(null);
   const [pickup, setPickup] = useState('');
   const [dropoff, setDropoff] = useState('');
@@ -39,6 +39,10 @@ export default function HomeScreen() {
   const [activeInput, setActiveInput] = useState<'pickup' | 'dropoff' | null>(null);
   const [fare, setFare] = useState<string | null>(null);
   const [riderProfile, setRiderProfile] = useState<RiderProfile | null>(null);
+
+  // Animation refs
+  const sheetAnim = useRef(new Animated.Value(0)).current; // 0 = booking, 1 = active trip
+  const fareAnim = useRef(new Animated.Value(0)).current;  // 0 = hidden, 1 = visible
 
   // Get user location on mount
   useEffect(() => {
@@ -103,6 +107,8 @@ export default function HomeScreen() {
             setDropoff('');
             setDropoffCoords(null);
             setFare(null);
+            fareAnim.setValue(0);
+            Animated.timing(sheetAnim, { toValue: 0, duration: 200, useNativeDriver: false }).start();
           }, 3000);
         }
       })
@@ -110,6 +116,15 @@ export default function HomeScreen() {
 
     return () => { supabase.removeChannel(channel); };
   }, [tripId]);
+
+  // Animate sheet when trip status transitions between idle and active
+  useEffect(() => {
+    if (tripStatus === 'idle') {
+      Animated.timing(sheetAnim, { toValue: 0, duration: 200, useNativeDriver: false }).start();
+    } else if (tripStatus === 'searching') {
+      Animated.timing(sheetAnim, { toValue: 1, duration: 200, useNativeDriver: false }).start();
+    }
+  }, [tripStatus]);
 
   // Handle map press to set dropoff
   function handleMapPress(e: { nativeEvent: { coordinate: LatLng } }) {
@@ -125,6 +140,9 @@ export default function HomeScreen() {
         const dist = haversineKm(pickupCoords.latitude, pickupCoords.longitude, coord.latitude, coord.longitude);
         const estimated = Math.max(1.5, 0.5 + dist * 0.35);
         setFare(estimated.toFixed(2));
+        // Animate fare row in
+        fareAnim.setValue(0);
+        Animated.timing(fareAnim, { toValue: 1, duration: 250, useNativeDriver: true }).start();
       }
     }
   }
@@ -204,12 +222,23 @@ export default function HomeScreen() {
     completed: t('tripComplete'),
   };
 
+  const isActiveTrip = tripStatus !== 'idle';
+  const isSearching = tripStatus === 'searching' || tripStatus === 'dispatching';
+  const statusDotColor = isSearching ? '#F5A623' : '#4CAF50';
+
+  const fareAnimStyle = {
+    opacity: fareAnim,
+    transform: [{
+      translateY: fareAnim.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }),
+    }],
+  };
+
   return (
     <View style={styles.container}>
-      {/* Map */}
+      {/* Map fills entire background */}
       <MapView
         ref={mapRef}
-        style={styles.map}
+        style={StyleSheet.absoluteFillObject}
         provider={PROVIDER_GOOGLE}
         initialRegion={{ ...AMMAN, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
         onPress={handleMapPress}
@@ -220,12 +249,12 @@ export default function HomeScreen() {
           <Marker coordinate={pickupCoords} title="Pickup" pinColor="#F5A623" />
         )}
         {dropoffCoords && (
-          <Marker coordinate={dropoffCoords} title="Dropoff" pinColor="#00C851" />
+          <Marker coordinate={dropoffCoords} title="Dropoff" pinColor="#4CAF50" />
         )}
         {driverLocation && (
           <Marker coordinate={driverLocation} title="Driver">
             <View style={styles.driverMarker}>
-              <Text style={styles.driverMarkerText}>🚗</Text>
+              <Ionicons name="car" size={14} color="#FFF" />
             </View>
           </Marker>
         )}
@@ -239,14 +268,14 @@ export default function HomeScreen() {
         )}
       </MapView>
 
-      {/* Top bar */}
+      {/* Top bar — overlaid on map */}
       <SafeAreaView style={styles.topBar} edges={['top']}>
         <View style={styles.topBarInner}>
           <View style={styles.logoRow}>
-            <Text style={styles.topLogo}>وصل</Text>
+            <Text style={styles.topLogo}>Wasel</Text>
             {riderProfile?.is_waitlist_member && (
               <View style={styles.earlyBadge}>
-                <Text style={styles.earlyBadgeStar}>⭐</Text>
+                <Ionicons name="star" size={10} color="#F5A623" />
                 <Text style={styles.earlyBadgeText}>{t('earlyMember')}</Text>
               </View>
             )}
@@ -254,44 +283,54 @@ export default function HomeScreen() {
         </View>
       </SafeAreaView>
 
-      {/* Bottom sheet */}
-      <View style={styles.bottomSheet}>
-        {tripStatus === 'idle' ? (
+      {/* Map spacer — lets map tap events pass through */}
+      <View style={styles.mapSpacer} pointerEvents="none" />
+
+      {/* Booking panel — anchored naturally at bottom as flex child */}
+      <View style={[styles.bookingPanel, { paddingBottom: 60 }]}>
+        {/* Drag handle */}
+        <View style={styles.sheetHandle} />
+
+        {!isActiveTrip ? (
           <>
-            <Text style={styles.sheetGreeting}>Welcome back 👋</Text>
             <Text style={styles.sheetTitle}>{t('whereTo')}</Text>
 
             {/* Pickup input */}
             <TouchableOpacity
-              style={[styles.inputRow, activeInput === 'pickup' && styles.inputRowActive]}
+              style={[styles.inputField, activeInput === 'pickup' && styles.inputFieldActive]}
               onPress={() => setActiveInput('pickup')}
+              activeOpacity={0.75}
             >
-              <View style={[styles.dot, { backgroundColor: '#F5A623' }]} />
-              <Text style={[styles.inputText, !pickup && styles.placeholder]}>
+              <Ionicons name="radio-button-on" size={16} color="#F5A623" />
+              <Text style={[styles.inputFieldText, !pickup && styles.placeholder]}>
                 {pickup || t('setPickup')}
               </Text>
             </TouchableOpacity>
 
-            <View style={styles.divider} />
+            {/* Connecting line between inputs */}
+            <View style={styles.routeLine} />
 
             {/* Dropoff input */}
             <TouchableOpacity
-              style={[styles.inputRow, activeInput === 'dropoff' && styles.inputRowActive]}
+              style={[styles.inputField, activeInput === 'dropoff' && styles.inputFieldActive]}
               onPress={() => setActiveInput('dropoff')}
+              activeOpacity={0.75}
             >
-              <View style={[styles.dot, { backgroundColor: '#00C851' }]} />
-              <Text style={[styles.inputText, !dropoff && styles.placeholder]}>
+              <Ionicons name="location" size={16} color="#4CAF50" />
+              <Text style={[styles.inputFieldText, !dropoff && styles.placeholder]}>
                 {dropoff || t('tapMapDest')}
               </Text>
             </TouchableOpacity>
 
-            {/* Fare estimate */}
+            {/* Fare estimate — animated in */}
             {fare && dropoffCoords && (
-              <View style={styles.fareRow}>
-                <Text style={styles.fareLabel}>{t('estimatedFare')}</Text>
-                <Text style={styles.fareAmount}>{fare} JD</Text>
-                <Text style={styles.fareNote}>{t('cashPayment')}</Text>
-              </View>
+              <Animated.View style={[styles.fareRow, fareAnimStyle]}>
+                <View style={styles.fareTopRow}>
+                  <Text style={styles.fareLabel}>{t('estimatedFare')}</Text>
+                  <Text style={styles.fareAmount}>{fare} JD</Text>
+                </View>
+                <Text style={styles.fareNote}>{t('cashPayment')} · {t('tapMapDest')}</Text>
+              </Animated.View>
             )}
 
             <TouchableOpacity
@@ -300,20 +339,32 @@ export default function HomeScreen() {
               disabled={!dropoffCoords}
               activeOpacity={0.85}
             >
-              <Text style={styles.requestButtonText}>🚖 {t('requestWasel')}</Text>
+              <Text style={styles.requestButtonText}>{t('requestWasel')}</Text>
             </TouchableOpacity>
           </>
         ) : (
           <View style={styles.statusSheet}>
+            {/* Status indicator */}
             <View style={styles.statusRow}>
-              {(tripStatus === 'searching' || tripStatus === 'dispatching') && (
-                <ActivityIndicator color="#F5A623" style={{ marginRight: 12 }} />
+              {isSearching ? (
+                <ActivityIndicator color="#F5A623" style={styles.statusSpinner} />
+              ) : (
+                <View style={[styles.statusDot, { backgroundColor: statusDotColor }]} />
               )}
-              <Text style={styles.statusText}>{statusLabel[tripStatus]}</Text>
+              {tripStatus === 'completed' ? (
+                <Text style={styles.statusLabel}>Trip complete</Text>
+              ) : (
+                <Text style={styles.statusLabel}>{statusLabel[tripStatus]}</Text>
+              )}
             </View>
 
+            {/* Cancel button — full width outline */}
             {tripStatus !== 'completed' && tripStatus !== 'in_progress' && (
-              <TouchableOpacity style={styles.cancelButton} onPress={handleCancelTrip}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={handleCancelTrip}
+                activeOpacity={0.75}
+              >
                 <Text style={styles.cancelButtonText}>{t('cancel')}</Text>
               </TouchableOpacity>
             )}
@@ -334,73 +385,219 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0A0A0A' },
-  map: { flex: 1 },
+  container: {
+    flex: 1,
+    backgroundColor: '#0A0A0A',
+  },
+
+  // Top bar
   topBar: {
-    position: 'absolute', top: 0, left: 0, right: 0,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
     zIndex: 10,
   },
   topBarInner: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    marginHorizontal: 20, marginTop: 8,
-    backgroundColor: 'rgba(10,10,10,0.85)',
-    borderRadius: 14, paddingHorizontal: 16, paddingVertical: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginHorizontal: 20,
+    marginTop: 8,
+    backgroundColor: 'rgba(10,10,10,0.82)',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#1E1E1E',
   },
-  logoRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  topLogo: { fontSize: 22, fontWeight: '700', color: '#F5A623' },
+  logoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  topLogo: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#F5A623',
+  },
   earlyBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     backgroundColor: 'rgba(245,166,35,0.15)',
-    borderRadius: 10, paddingHorizontal: 7, paddingVertical: 3,
-    borderWidth: 1, borderColor: 'rgba(245,166,35,0.3)',
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.3)',
   },
-  earlyBadgeStar: { fontSize: 10 },
-  earlyBadgeText: { color: '#F5A623', fontSize: 10, fontWeight: '600' },
-  bottomSheet: {
-    // Sit on top of the 60px tab bar so content isn't hidden behind it
-    position: 'absolute', bottom: 60, left: 0, right: 0,
+  earlyBadgeText: {
+    color: '#F5A623',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+
+  // Map spacer — transparent, lets map touch events through
+  mapSpacer: {
+    flex: 1,
+  },
+
+  // Booking panel
+  bookingPanel: {
     backgroundColor: '#111',
-    borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    padding: 24,
-    paddingBottom: Platform.OS === 'ios' ? 8 : 16,
-    shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.3, shadowRadius: 10,
-    elevation: 10,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 12,
   },
-  sheetGreeting: { fontSize: 12, color: '#555', marginBottom: 4, fontWeight: '500' },
-  sheetTitle: { fontSize: 20, fontWeight: '700', color: '#FFF', marginBottom: 16 },
-  inputRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingVertical: 12, paddingHorizontal: 4,
+
+  // Drag handle
+  sheetHandle: {
+    width: 36,
+    height: 4,
+    backgroundColor: '#2A2A2A',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 16,
   },
-  inputRowActive: { opacity: 1 },
-  dot: { width: 10, height: 10, borderRadius: 5 },
-  inputText: { flex: 1, fontSize: 16, color: '#FFF' },
-  placeholder: { color: '#555' },
-  divider: { height: 1, backgroundColor: '#1E1E1E', marginVertical: 2, marginLeft: 22 },
+
+  sheetTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#FFF',
+    marginBottom: 14,
+  },
+
+  // Input fields
+  inputField: {
+    backgroundColor: '#161616',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: '#1E1E1E',
+  },
+  inputFieldActive: {
+    borderColor: '#2A2A2A',
+  },
+  inputFieldText: {
+    flex: 1,
+    fontSize: 16,
+    color: '#FFF',
+  },
+  placeholder: {
+    color: '#555',
+  },
+
+  // Connecting line between pickup and dropoff
+  routeLine: {
+    width: 1,
+    height: 20,
+    backgroundColor: '#2A2A2A',
+    marginLeft: 21,
+    marginVertical: 2,
+  },
+
+  // Fare row
   fareRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: '#1A1A1A', borderRadius: 10, padding: 12, marginTop: 12,
+    backgroundColor: '#161616',
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#1E1E1E',
+    gap: 4,
   },
-  fareLabel: { color: '#888', fontSize: 13, flex: 1 },
-  fareAmount: { color: '#F5A623', fontSize: 18, fontWeight: '700' },
-  fareNote: { color: '#555', fontSize: 12 },
+  fareTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  fareLabel: {
+    color: '#888',
+    fontSize: 13,
+  },
+  fareAmount: {
+    color: '#F5A623',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  fareNote: {
+    color: '#555',
+    fontSize: 12,
+  },
+
+  // Request button
   requestButton: {
-    backgroundColor: '#F5A623', borderRadius: 14,
-    paddingVertical: 16, alignItems: 'center', marginTop: 16,
+    backgroundColor: '#F5A623',
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 16,
   },
-  requestButtonDisabled: { opacity: 0.35 },
-  requestButtonText: { color: '#000', fontWeight: '700', fontSize: 17 },
-  statusSheet: { alignItems: 'center', paddingVertical: 8 },
-  statusRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
-  statusText: { fontSize: 20, fontWeight: '700', color: '#FFF' },
+  requestButtonDisabled: {
+    opacity: 0.35,
+  },
+  requestButtonText: {
+    color: '#000',
+    fontWeight: '700',
+    fontSize: 17,
+  },
+
+  // Status / active trip panel
+  statusSheet: {
+    paddingVertical: 8,
+    gap: 16,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  statusSpinner: {
+    // ActivityIndicator has its own sizing
+  },
+  statusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  statusLabel: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#FFF',
+  },
   cancelButton: {
-    borderWidth: 1, borderColor: '#333', borderRadius: 12,
-    paddingVertical: 12, paddingHorizontal: 32,
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
   },
-  cancelButtonText: { color: '#888', fontSize: 15 },
+  cancelButtonText: {
+    color: '#888',
+    fontSize: 15,
+    fontWeight: '500',
+  },
+
+  // Driver marker on map
   driverMarker: {
-    backgroundColor: '#111', borderRadius: 20,
-    padding: 4, borderWidth: 1, borderColor: '#333',
+    backgroundColor: '#F5A623',
+    borderRadius: 20,
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#FFF',
   },
-  driverMarkerText: { fontSize: 20 },
 });
