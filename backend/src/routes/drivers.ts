@@ -141,4 +141,37 @@ router.post('/register', requireAuth, async (req: AuthRequest, res) => {
   res.status(201).json({ ok: true, status: 'pending_approval' });
 });
 
+// GET /api/drivers/trips — last 20 completed/cancelled trips + earnings summary
+router.get('/trips', requireAuth, requireDriver, async (req: AuthRequest, res) => {
+  const { data, error } = await supabase
+    .from('trips')
+    .select(`
+      id, status, pickup_address, dropoff_address,
+      fare_amount, created_at, completed_at, rider_rating
+    `)
+    .eq('driver_id', req.userId)
+    .in('status', ['completed', 'cancelled'])
+    .order('created_at', { ascending: false })
+    .limit(20);
+
+  if (error) return res.status(500).json({ error: 'Failed to fetch trips' });
+
+  const trips = data ?? [];
+  const completed = trips.filter(t => t.status === 'completed');
+  const totalEarnings = completed.reduce((sum, t) => sum + Number(t.fare_amount ?? 0), 0);
+  const today = new Date().toDateString();
+  const todayEarnings = completed
+    .filter(t => t.completed_at && new Date(t.completed_at).toDateString() === today)
+    .reduce((sum, t) => sum + Number(t.fare_amount ?? 0), 0);
+
+  res.json({
+    trips,
+    summary: {
+      total_trips:       completed.length,
+      total_earnings_jd: Number(totalEarnings.toFixed(2)),
+      today_earnings_jd: Number(todayEarnings.toFixed(2)),
+    },
+  });
+});
+
 export default router;

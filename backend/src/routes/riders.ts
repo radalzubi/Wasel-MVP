@@ -38,4 +38,22 @@ router.patch('/push-token', requireAuth, requireRider, async (req: AuthRequest, 
   res.json({ ok: true });
 });
 
+// GET /api/riders/trips — last 20 completed/cancelled trips for the rider
+router.get('/trips', requireAuth, requireRider, async (req: AuthRequest, res) => {
+  const { data, error } = await supabase
+    .from('trips')
+    .select(`
+      id, status, pickup_address, dropoff_address,
+      fare_amount, created_at, completed_at, driver_rating,
+      driver:driver_id (name, vehicle_make, vehicle_model)
+    `)
+    .eq('rider_id', req.userId)
+    .in('status', ['completed', 'cancelled'])
+    .order('created_at', { ascending: false })
+    .limit(20);
+
+  if (error) return res.status(500).json({ error: 'Failed to fetch trips' });
+  res.json(data ?? []);
+});
+
 export default router;
