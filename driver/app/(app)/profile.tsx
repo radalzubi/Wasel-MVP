@@ -21,8 +21,6 @@ interface DriverProfile {
   subscription_tier: number;
   is_online: boolean;
   created_at: string;
-  is_waitlist_member: boolean;
-  waitlist_position: number | null;
 }
 
 const TIER: Record<number, { label: string; color: string; bg: string }> = {

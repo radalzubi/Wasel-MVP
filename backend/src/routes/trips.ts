@@ -394,35 +394,28 @@ router.get('/any-pending', requireAuth, requireRider, async (req: AuthRequest, r
 router.get('/active', requireAuth, requireRider, async (req: AuthRequest, res) => {
   const LIVE_STATUSES = ['accepted', 'en_route', 'arrived', 'in_progress'];
 
-  // Data integrity check: if multiple active trips exist (TOCTOU race window),
-  // log it so it can be investigated. The DB-level fix is:
+  // Single query: fetch all live trips. Data integrity check (multiple active trips)
+  // is done inline — no second round-trip needed.
+  // The DB-level guard that prevents duplicates is:
   //   CREATE UNIQUE INDEX one_active_trip_per_rider ON trips (rider_id)
   //   WHERE status NOT IN ('completed','cancelled');
-  const { data: allActive } = await supabase
-    .from('trips')
-    .select('id')
-    .eq('rider_id', req.userId!)
-    .in('status', LIVE_STATUSES);
-
-  if ((allActive?.length ?? 0) > 1) {
-    console.error(`[trips/active] DATA INTEGRITY: rider ${req.userId} has ${allActive!.length} concurrent active trips — investigate immediately`);
-  }
-
-  const { data, error } = await supabase
+  const { data: allActive, error } = await supabase
     .from('trips')
     .select('id, driver_id, status, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, pickup_address, dropoff_address, fare_amount')
     .eq('rider_id', req.userId!)
     .in('status', LIVE_STATUSES)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .order('created_at', { ascending: false });
 
   if (error) {
     console.error('[trips/active] DB error:', error.message);
     return res.status(500).json({ error: 'Failed to fetch active trip' });
   }
 
-  res.json(data ?? null); // null = no active trip (not an error)
+  if ((allActive?.length ?? 0) > 1) {
+    console.error(`[trips/active] DATA INTEGRITY: rider ${req.userId} has ${allActive!.length} concurrent active trips — investigate immediately`);
+  }
+
+  res.json(allActive?.[0] ?? null); // null = no active trip (not an error)
 });
 
 // GET /api/trips/driver-active — driver's current assigned trip, used to restore the driver UI

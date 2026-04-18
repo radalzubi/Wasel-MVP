@@ -74,13 +74,26 @@ async function fetchNearbyPage(type: string, key: string): Promise<Place[]> {
   const res = await fetch(url, { signal: AbortSignal.timeout(8_000) });
   if (!res.ok) return [];
 
-  const json = await res.json() as any;
+  interface GooglePlacesResponse {
+    status: string;
+    results?: Array<{
+      place_id: string;
+      name: string;
+      types: string[];
+      vicinity?: string;
+      geometry?: { location?: { lat?: number; lng?: number } };
+      rating?: number;
+      price_level?: number;
+    }>;
+  }
+
+  const json = await res.json() as GooglePlacesResponse;
   if (json.status !== 'OK' && json.status !== 'ZERO_RESULTS') {
     console.warn(`[explore] Google Places ${type} returned status=${json.status}`);
     return [];
   }
 
-  return ((json.results ?? []) as any[]).slice(0, 8).map((p): Place => ({
+  return (json.results ?? []).slice(0, 8).map((p): Place => ({
     id:             p.place_id,
     name:           p.name,
     name_ar:        p.name,          // Arabic localisation requires a separate API call; use English as fallback
@@ -92,7 +105,7 @@ async function fetchNearbyPage(type: string, key: string): Promise<Place[]> {
     lat:            p.geometry?.location?.lat ?? AMMAN_LAT,
     lng:            p.geometry?.location?.lng ?? AMMAN_LNG,
     rating:         p.rating ?? 0,
-    price_range:    PRICE_RANGE[p.price_level as number] ?? '$$',
+    price_range:    PRICE_RANGE[p.price_level ?? 2] ?? '$$',
     image_emoji:    googleTypeToEmoji(p.types ?? []),
   }));
 }

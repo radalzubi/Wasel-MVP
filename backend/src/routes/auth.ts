@@ -90,8 +90,18 @@ const PHONE_OTP_MAX        = 3;
 const PHONE_OTP_WINDOW_MS  = 15 * 60 * 1000;
 const phoneOtpMap          = new Map<string, { count: number; resetAt: number }>();
 
+// Prune expired entries whenever the map is accessed to prevent unbounded growth.
+// Called before every isPhoneThrottled check so stale keys are removed naturally.
+function prunePhoneOtpMap(): void {
+  const now = Date.now();
+  for (const [key, entry] of phoneOtpMap) {
+    if (entry.resetAt <= now) phoneOtpMap.delete(key);
+  }
+}
+
 function isPhoneThrottled(phone: string): boolean {
-  const now  = Date.now();
+  prunePhoneOtpMap();
+  const now   = Date.now();
   const entry = phoneOtpMap.get(phone);
   if (!entry || entry.resetAt <= now) {
     phoneOtpMap.set(phone, { count: 1, resetAt: now + PHONE_OTP_WINDOW_MS });
@@ -134,6 +144,7 @@ async function ensureDevDriverProfile(userId: string, phone: string): Promise<vo
     vehicle_model:     'Corolla',
     vehicle_plate:     'TEST-001',
     subscription_tier: 2,
+    is_approved:       true,   // Pre-approve so the test driver can go online immediately
     became_available_at: new Date().toISOString(),
     // Default to Amman city centre so the dispatch engine can locate this driver
     // immediately after login, before the first real GPS ping (sent 10s after
