@@ -1,8 +1,10 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 
 export default function WaitlistSuccess() {
+  const router = useRouter();
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.inner}>
@@ -15,6 +17,15 @@ export default function WaitlistSuccess() {
         <View style={styles.badge}>
           <Text style={styles.badgeText}>وصل  ·  Wasel</Text>
         </View>
+
+        <TouchableOpacity
+          style={{ marginTop: 24 }}
+          onPress={() => router.replace('/(auth)/login' as any)}
+        >
+          <Text style={{ color: '#F5A623', fontWeight: '600', fontSize: 15, textAlign: 'center' }}>
+            Already have an account? Sign in
+          </Text>
+        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
