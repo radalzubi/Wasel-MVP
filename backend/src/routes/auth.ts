@@ -263,6 +263,10 @@ router.post('/verify', otpLimiter, async (req, res) => {
       return res.status(500).json({ error: 'Failed to create dev profile' });
     }
 
+    // Stamp app_metadata so role resolves from JWT without a DB round-trip.
+    supabaseAdmin.auth.admin.updateUserById(userId, { app_metadata: { role: canonicalRole } })
+      .catch((e) => console.warn('[dev/verify] app_metadata stamp failed:', e));
+
     return res.json({ session: data.session, user: { id: userId, phone, role: canonicalRole } });
   }
 
@@ -294,6 +298,10 @@ router.post('/verify', otpLimiter, async (req, res) => {
       console.error('[verify] Rider upsert failed:', upsertErr.message);
       return res.status(500).json({ error: 'Failed to create rider profile' });
     }
+    // Stamp role in app_metadata so requireAuth never has to do a DB lookup.
+    // Non-fatal — DB row is the authoritative fallback.
+    supabaseAdmin.auth.admin.updateUserById(userId, { app_metadata: { role: 'rider' } })
+      .catch((e) => console.warn('[verify] app_metadata rider stamp failed:', e));
     // Non-fatal: waitlist membership failure should not block login
     try { await applyWaitlistMembership(userId, phone, 'riders'); } catch { /* non-fatal */ }
   } else {
@@ -306,9 +314,15 @@ router.post('/verify', otpLimiter, async (req, res) => {
 
     if (!existingDriver) {
       // Driver doesn't have a profile yet — send them to the registration screen.
+      // Stamp as driver now so subsequent registration calls know the role.
+      supabaseAdmin.auth.admin.updateUserById(userId, { app_metadata: { role: 'driver' } })
+        .catch((e) => console.warn('[verify] app_metadata driver stamp (pre-reg) failed:', e));
       return res.status(200).json({ status: 'pending_registration', session: data.session });
     }
 
+    // Stamp role in app_metadata for fast role resolution going forward.
+    supabaseAdmin.auth.admin.updateUserById(userId, { app_metadata: { role: 'driver' } })
+      .catch((e) => console.warn('[verify] app_metadata driver stamp failed:', e));
     // Non-fatal: waitlist membership failure should not block login
     try { await applyWaitlistMembership(userId, phone, 'drivers'); } catch { /* non-fatal */ }
   }
@@ -398,6 +412,10 @@ router.post('/dev-login', otpLimiter, async (req, res) => {
     console.error('[dev-login] profile upsert error:', msg);
     return res.status(500).json({ error: 'Failed to create dev profile. Check server logs.' });
   }
+
+  // Stamp app_metadata so the role is always readable from the JWT without a DB lookup.
+  supabaseAdmin.auth.admin.updateUserById(userId, { app_metadata: { role } })
+    .catch((e) => console.warn('[dev-login] app_metadata stamp failed:', e));
 
   res.json({ session: data.session, user: { id: userId, phone: creds.phone, role } });
 });

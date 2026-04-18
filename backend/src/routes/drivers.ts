@@ -138,6 +138,12 @@ router.post('/register', requireAuth, async (req: AuthRequest, res) => {
     console.error('[drivers/register] insert error:', error.message);
     return res.status(500).json({ error: 'Failed to create driver profile' });
   }
+
+  // Stamp app_metadata.role = 'driver' so requireAuth resolves role from the JWT
+  // without a DB round-trip. Non-fatal — DB row is the authoritative fallback.
+  supabaseAdmin.auth.admin.updateUserById(req.userId!, { app_metadata: { role: 'driver' } })
+    .catch((e) => console.warn('[drivers/register] app_metadata stamp failed:', e));
+
   res.status(201).json({ ok: true, status: 'pending_approval' });
 });
 

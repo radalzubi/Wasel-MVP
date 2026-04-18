@@ -208,6 +208,9 @@ export default function DashboardScreen() {
           const data = await res.json();
           setSubscriptionTier(data.subscription_tier ?? 1);
           setIsApproved(data.is_approved ?? false);
+          // Restore the persisted online state so the driver doesn't have to
+          // tap "Go Online" every time they reopen the app.
+          if (data.is_online === true) setIsOnline(true);
         }
       } catch { /* non-fatal */ }
     })();

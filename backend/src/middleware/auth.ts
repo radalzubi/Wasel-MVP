@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { supabase, supabaseAdmin } from '../lib/supabase';
+import { supabaseAdmin } from '../lib/supabase';
 
 export interface AuthRequest extends Request {
   userId?: string;
@@ -10,24 +10,24 @@ export async function requireAuth(req: AuthRequest, res: Response, next: NextFun
   const token = req.headers.authorization?.replace('Bearer ', '');
   if (!token) return res.status(401).json({ error: 'No token provided' });
 
-  const { data: { user }, error } = await supabase.auth.getUser(token);
+  // Always use supabaseAdmin (service-role client that is never polluted by
+  // signInWithPassword calls) to validate the incoming JWT.
+  const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
   if (error || !user) return res.status(401).json({ error: 'Invalid token' });
 
   req.userId = user.id;
 
-  // NOTE: This makes an extra DB round-trip on every authenticated request to
-  // determine the caller's role. Under high concurrency this adds latency and
-  // can become a DoS amplification vector (one incoming request → two Supabase
-  // round-trips). Consider encoding the role in the JWT custom claims (set via
-  // a Supabase Auth hook) so role can be read from the token without a DB query.
-  // For now, role-guarded endpoints rely on requireDriver/requireRider being
-  // chained immediately after requireAuth in the route definition.
-  //
-  // supabaseAdmin is used here (not supabase) to avoid the user-JWT session
-  // pollution described in lib/supabase.ts. The shared `supabase` client's
-  // in-memory auth state may hold a different user's JWT from a recent
-  // signInWithPassword() call in auth routes, causing the role lookup to run
-  // under the wrong uid and return no rows even for valid drivers.
+  // Primary: read role from app_metadata (set server-side during registration,
+  // never writable by the client). This avoids a DB round-trip on every request
+  // and is immune to cross-contamination when the same phone is used in both apps.
+  const metaRole = user.app_metadata?.role as string | undefined;
+  if (metaRole === 'driver' || metaRole === 'rider') {
+    req.userRole = metaRole;
+    return next();
+  }
+
+  // Fallback: DB lookup for accounts created before app_metadata was introduced.
+  // supabaseAdmin bypasses RLS so the lookup always returns the correct row.
   const { data: driver, error: roleErr } = await supabaseAdmin
     .from('drivers')
     .select('id')
