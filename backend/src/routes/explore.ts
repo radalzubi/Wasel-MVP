@@ -25,10 +25,122 @@ interface Place {
 }
 
 // ----------------------------------------------------------------
-// Hardcoded Amman places — MVP data set
+// Google Places helpers
 // ----------------------------------------------------------------
 
-const PLACES: Place[] = [
+// Amman city centre — used as the search origin for Google Places.
+const AMMAN_LAT = 31.9539;
+const AMMAN_LNG = 35.9106;
+const SEARCH_RADIUS_M = 8_000; // 8 km covers central Amman
+
+// Simple in-memory cache so we don't burn API quota on every request.
+let googlePlacesCache: Place[] | null = null;
+let googleCacheExpiresAt = 0;
+const CACHE_TTL_MS = 60 * 60 * 1_000; // 1 hour
+
+const PRICE_RANGE: Record<number, string> = { 0: 'Free', 1: '$', 2: '$$', 3: '$$$', 4: '$$$$' };
+
+// Google Places type → our category + emoji
+const TYPE_META: { types: string[]; category: PlaceCategory; emoji: string }[] = [
+  { types: ['restaurant'],         category: 'restaurant', emoji: '🍽️' },
+  { types: ['cafe'],               category: 'cafe',       emoji: '☕' },
+  { types: ['tourist_attraction'], category: 'landmark',   emoji: '🏛️' },
+  { types: ['shopping_mall'],      category: 'shopping',   emoji: '🛍️' },
+];
+
+function googleTypeToCategory(types: string[]): PlaceCategory {
+  if (types.includes('restaurant') || types.includes('food')) return 'restaurant';
+  if (types.includes('cafe'))                                  return 'cafe';
+  if (types.includes('shopping_mall') || types.includes('store')) return 'shopping';
+  return 'landmark';
+}
+
+function googleTypeToEmoji(types: string[]): string {
+  if (types.includes('restaurant') || types.includes('food')) return '🍽️';
+  if (types.includes('cafe'))                                  return '☕';
+  if (types.includes('shopping_mall'))                         return '🛍️';
+  return '📍';
+}
+
+// Fetch one "page" of nearby results for a given Google Places type.
+async function fetchNearbyPage(type: string, key: string): Promise<Place[]> {
+  const url =
+    `https://maps.googleapis.com/maps/api/place/nearbysearch/json` +
+    `?location=${AMMAN_LAT},${AMMAN_LNG}` +
+    `&radius=${SEARCH_RADIUS_M}` +
+    `&type=${type}` +
+    `&key=${key}`;
+
+  const res = await fetch(url, { signal: AbortSignal.timeout(8_000) });
+  if (!res.ok) return [];
+
+  const json = await res.json() as any;
+  if (json.status !== 'OK' && json.status !== 'ZERO_RESULTS') {
+    console.warn(`[explore] Google Places ${type} returned status=${json.status}`);
+    return [];
+  }
+
+  return ((json.results ?? []) as any[]).slice(0, 8).map((p): Place => ({
+    id:             p.place_id,
+    name:           p.name,
+    name_ar:        p.name,          // Arabic localisation requires a separate API call; use English as fallback
+    category:       googleTypeToCategory(p.types ?? []),
+    description:    p.vicinity ?? '',
+    description_ar: p.vicinity ?? '',
+    address:        p.vicinity ?? '',
+    address_ar:     p.vicinity ?? '',
+    lat:            p.geometry?.location?.lat ?? AMMAN_LAT,
+    lng:            p.geometry?.location?.lng ?? AMMAN_LNG,
+    rating:         p.rating ?? 0,
+    price_range:    PRICE_RANGE[p.price_level as number] ?? '$$',
+    image_emoji:    googleTypeToEmoji(p.types ?? []),
+  }));
+}
+
+// Fetch all categories from Google Places and merge, deduplicate by place_id.
+async function fetchGooglePlaces(): Promise<Place[]> {
+  const key = process.env.GOOGLE_PLACES_API_KEY;
+  if (!key) return [];
+
+  const now = Date.now();
+  if (googlePlacesCache && now < googleCacheExpiresAt) return googlePlacesCache;
+
+  try {
+    const results = await Promise.allSettled(
+      TYPE_META.map((m) => fetchNearbyPage(m.types[0], key)),
+    );
+
+    const seen  = new Set<string>();
+    const places: Place[] = [];
+
+    for (const r of results) {
+      if (r.status === 'rejected') continue;
+      for (const p of r.value) {
+        if (!seen.has(p.id)) {
+          seen.add(p.id);
+          places.push(p);
+        }
+      }
+    }
+
+    if (places.length > 0) {
+      googlePlacesCache    = places;
+      googleCacheExpiresAt = now + CACHE_TTL_MS;
+      return places;
+    }
+  } catch (err) {
+    console.warn('[explore] Google Places fetch failed, using static data:', err);
+  }
+
+  return [];
+}
+
+// ----------------------------------------------------------------
+// Hardcoded Amman places — MVP fallback when Google Places key is
+// absent or the API is temporarily unavailable.
+// ----------------------------------------------------------------
+
+const STATIC_PLACES: Place[] = [
   // Restaurants
   {
     id:             'hashem',
@@ -280,29 +392,40 @@ const PLACES: Place[] = [
 
 // ----------------------------------------------------------------
 // GET /api/explore
-// Rate-limiting note: this endpoint is unauthenticated and intentionally
-// serves static, hardcoded data (no DB queries). The global 100 req/min
-// limit applied in index.ts is accepted as sufficient for the MVP.
-// If the data source changes to a live DB query, add a dedicated
-// 30 req/min limiter here.
+//
+// Returns Google Places Nearby results for central Amman when
+// GOOGLE_PLACES_API_KEY is configured, otherwise falls back to the
+// curated static list above.  Results are cached for 1 hour.
+//
+// Rate-limiting note: the global 100 req/min limit applied in
+// index.ts is sufficient for the MVP.  If this becomes a hot
+// endpoint, add a dedicated 30 req/min limiter here.
 // ----------------------------------------------------------------
 
-router.get('/', (req: Request, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
   const { category } = req.query;
 
+  // Validate category filter if provided
   if (category !== undefined) {
     const validCategories: PlaceCategory[] = ['restaurant', 'cafe', 'landmark', 'shopping'];
     if (!validCategories.includes(category as PlaceCategory)) {
       return res.status(400).json({
-        error:      'Invalid category',
-        valid:      validCategories,
-        received:   category,
+        error:    'Invalid category',
+        valid:    validCategories,
+        received: category,
       });
     }
-    return res.json(PLACES.filter((p) => p.category === category));
   }
 
-  res.json(PLACES);
+  // Try Google Places first; fall through to static data on failure / missing key
+  let places = await fetchGooglePlaces();
+  if (places.length === 0) places = STATIC_PLACES;
+
+  const filtered = category
+    ? places.filter((p) => p.category === category)
+    : places;
+
+  res.json(filtered);
 });
 
 export default router;

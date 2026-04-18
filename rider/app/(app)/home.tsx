@@ -174,8 +174,11 @@ export default function HomeScreen() {
         const did = payload.new.driver_id as string | null;
         setTripStatus(st);
         if (did) setDriverId(did);
-        if (st === 'completed' || st === 'cancelled') {
+        if (st === 'completed') {
           setTimeout(resetTripState, 3000);
+        } else if (st === 'cancelled') {
+          // Show "Trip cancelled" briefly then return to idle
+          setTimeout(resetTripState, 1500);
         }
       })
       .subscribe(async () => {
@@ -838,10 +841,12 @@ const s = StyleSheet.create({
   },
   routeRowValue: { fontSize: 14, color: '#EEE', fontWeight: '500' },
   routeCardSep: {
-    paddingLeft: 38, // aligns with text (14 pad + 12 pip + 12 gap)
-    height: 18, justifyContent: 'center',
+    // 14px card padding + 6px = centre of the 12px pip dot
+    paddingLeft: 19,
+    height: 14,
+    justifyContent: 'center',
   },
-  routeCardLine: { width: 1, height: '100%', backgroundColor: '#252525' },
+  routeCardLine: { width: 2, height: '100%', backgroundColor: '#2A2A2A', borderRadius: 1 },
 
   // Pip dots
   pipPickup: {
