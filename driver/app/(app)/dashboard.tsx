@@ -88,6 +88,7 @@ export default function DashboardScreen() {
   const [offer, setOffer]                     = useState<TripOffer | null>(null);
   const [offerTimer, setOfferTimer]           = useState(15);
   const [currentTrip, setCurrentTrip]         = useState<{ id: string; status: TripStatus } | null>(null);
+  const currentTripRef = useRef<{ id: string; status: TripStatus } | null>(null);
   const [subscriptionTier, setSubscriptionTier] = useState<number>(1);
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [ratingStars, setRatingStars]         = useState(0);
@@ -96,6 +97,9 @@ export default function DashboardScreen() {
   const [tripDetails, setTripDetails]         = useState<TripDetails | null>(null);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Prevents the Realtime trip-update channel from acting on CDC catchup
+  // events (replayed while-offline events) immediately after a restore.
+  const justRestoredRef = useRef(false);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const pulseLoopRef = useRef<Animated.CompositeAnimation | null>(null);
 
@@ -104,6 +108,28 @@ export default function DashboardScreen() {
     isMounted.current = true;
     return () => { isMounted.current = false; };
   }, []);
+
+  // Sign-out guard: when the user signs out, tear down all Realtime channels
+  // and reset trip/online state so a new login session starts clean.
+  const wasSignedInRef = useRef(false);
+  useEffect(() => {
+    if (user) {
+      wasSignedInRef.current = true;
+    } else if (wasSignedInRef.current) {
+      wasSignedInRef.current = false;
+      supabase.removeAllChannels();
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+      setCurrentTrip(null);
+      setRiderInfo(null);
+      setTripDetails(null);
+      setOffer(null);
+      setIsOnline(false);
+    }
+  }, [user]);
+
+  // Keep currentTripRef in sync so the offer handler can check it synchronously
+  // without depending on stale closure values.
+  useEffect(() => { currentTripRef.current = currentTrip; }, [currentTrip]);
 
   // ── Session helper — one place to get the auth token ─────────────────────
   const getToken = useCallback(async (): Promise<string | null> => {
@@ -166,9 +192,10 @@ export default function DashboardScreen() {
         if (!res.ok || !isMounted.current) return;
         const data = await res.json();
         if (!data?.id) return;
-        // Bring driver online and restore the active trip — the existing
-        // useEffect([currentTrip?.id]) will re-fetch trip details and rider
-        // contact info, and resubscribe to Realtime updates automatically.
+        // Block catchup CDC events for 3s so a replayed 'cancelled' event
+        // from while the app was offline doesn't wipe the just-restored trip.
+        justRestoredRef.current = true;
+        setTimeout(() => { justRestoredRef.current = false; }, 3000);
         setIsOnline(true);
         setCurrentTrip({ id: data.id, status: data.status as TripStatus });
       } catch { /* non-fatal: don't block the dashboard */ }
@@ -194,18 +221,21 @@ export default function DashboardScreen() {
   useEffect(() => {
     if (!isOnline || !user) return;
     let sub: Location.LocationSubscription | null = null;
+    // Tracks cleanup so an already-started async callback doesn't PATCH
+    // location to the server after the driver has gone offline.
+    let cancelled = false;
 
     (async () => {
       try {
         sub = await Location.watchPositionAsync(
           { accuracy: Location.Accuracy.Balanced, timeInterval: 10_000, distanceInterval: 30 },
           async (loc) => {
-            if (!isMounted.current) return;
+            if (!isMounted.current || cancelled) return;
             const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
             setLocation(coords);
             try {
               const token = await getToken();
-              if (!token || !isMounted.current) return;
+              if (!token || !isMounted.current || cancelled) return;
               await fetch(`${API_URL}/api/drivers/location`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -217,7 +247,7 @@ export default function DashboardScreen() {
       } catch { /* permission revoked while online */ }
     })();
 
-    return () => { sub?.remove(); };
+    return () => { cancelled = true; sub?.remove(); };
   }, [isOnline, user, getToken]);
 
   // ── Fetch trip details + rider contact when trip accepted ─────────────────
@@ -285,6 +315,9 @@ export default function DashboardScreen() {
           if (!isMounted.current) return;
           const newStatus = (payload.new as { status?: string })?.status;
           if (newStatus === 'cancelled') {
+            // Skip catchup events replayed immediately after a restore — these
+            // are stale CDC events from when the app was offline, not new cancels.
+            if (justRestoredRef.current) return;
             setCurrentTrip(null);
             setRiderInfo(null);
             setTripDetails(null);
@@ -321,7 +354,9 @@ export default function DashboardScreen() {
               .eq('id', offerData.trip_id)
               .single();
 
-            if (!trip || !isMounted.current) return;
+            // Don't show a new offer if driver is already on an active trip —
+            // the backend should prevent this, but guard here for the race window.
+            if (!trip || !isMounted.current || currentTripRef.current) return;
 
             try {
               Vibration.vibrate(Platform.OS === 'android' ? [0, 400, 200, 400] : 400);
@@ -435,6 +470,13 @@ export default function DashboardScreen() {
     if (!currentTrip) return;
     // Snapshot the trip ID before any async gap
     const tripId = currentTrip.id;
+    // Optimistic clear for cancel: hide the trip panel immediately rather than
+    // waiting 1-2s for the network round-trip (gives instant UI feedback).
+    if (nextStatus === 'cancelled') {
+      setCurrentTrip(null);
+      setRiderInfo(null);
+      setTripDetails(null);
+    }
     try {
       const token = await getToken();
       if (!token) throw new Error('No session');
@@ -455,11 +497,8 @@ export default function DashboardScreen() {
         setCurrentTrip(null);
         setRiderInfo(null);
         setTripDetails(null);
-      } else if (nextStatus === 'cancelled') {
-        setCurrentTrip(null);
-        setRiderInfo(null);
-        setTripDetails(null);
-      } else {
+      } else if (nextStatus !== 'cancelled') {
+        // Cancelled was already cleared optimistically above
         setCurrentTrip({ id: tripId, status: nextStatus as TripStatus });
       }
     } catch (err: unknown) {

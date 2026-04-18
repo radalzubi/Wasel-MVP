@@ -117,8 +117,20 @@ app.listen(PORT, () => {
 
   // Start the durable dispatch poller (only in non-waitlist mode)
   if (!WAITLIST_MODE) {
-    startDispatchPoller();
+    const pollerHandle = startDispatchPoller();
     console.log('[dispatch] Poller started (interval: 5s)');
+    // Graceful shutdown: clear the poller so in-progress DB operations
+    // can complete before the process exits.
+    process.on('SIGTERM', () => {
+      clearInterval(pollerHandle);
+      console.log('[dispatch] Poller stopped (SIGTERM)');
+      process.exit(0);
+    });
+    process.on('SIGINT', () => {
+      clearInterval(pollerHandle);
+      console.log('[dispatch] Poller stopped (SIGINT)');
+      process.exit(0);
+    });
   }
 });
 

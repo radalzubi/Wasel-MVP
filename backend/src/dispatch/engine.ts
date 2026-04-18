@@ -135,14 +135,25 @@ export async function dispatchTrip(
 
   const winner = scored[0];
 
-  const { error: tripUpdateErr } = await supabase.from('trips').update({
+  // Atomic guard: only update if trip is still in a dispatchable state.
+  // Without this, a rider cancel between the status-check above and this update
+  // would overwrite 'cancelled' with 'dispatching', assigning a driver to a
+  // cancelled trip.
+  const { data: updatedTrips, error: tripUpdateErr } = await supabase.from('trips').update({
     status:    'dispatching',
     driver_id: winner.driverId,
     bmp_score: winner.score,
-  }).eq('id', tripId);
+  }).eq('id', tripId)
+    .in('status', ['requested', 'dispatching'])
+    .select('id');
 
   if (tripUpdateErr) {
     console.error('[dispatch] trip status update failed for trip', tripId, ':', tripUpdateErr.message);
+    return null;
+  }
+  if (!updatedTrips?.length) {
+    // Trip was cancelled or accepted between our status check and this update
+    console.log('[dispatch] trip', tripId, 'changed state before update — aborting dispatch round');
     return null;
   }
 

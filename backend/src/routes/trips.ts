@@ -186,11 +186,20 @@ router.post('/:id/accept', requireAuth, requireDriver, async (req: AuthRequest, 
     return res.status(410).json({ error: 'Offer has expired or was already processed' });
   }
 
-  const { error } = await supabase.from('trips')
+  // Atomic guard: only accept if trip is still 'dispatching'.
+  // Between the offer check above and this update, the rider may cancel or
+  // another instance may have processed this trip — the status guard makes
+  // this transition atomic and prevents resurrecting a cancelled trip.
+  const { data: acceptedTripRows, error } = await supabase.from('trips')
     .update({ status: 'accepted', driver_id: req.userId })
-    .eq('id', tripId);
+    .eq('id', tripId)
+    .eq('status', 'dispatching')
+    .select('id');
 
   if (error) return res.status(500).json({ error: 'Failed to accept trip' });
+  if (!acceptedTripRows?.length) {
+    return res.status(409).json({ error: 'Trip is no longer available' });
+  }
 
   // Mark driver as unavailable while on a trip.
   // became_available_at is cleared (set to null) — idle time stops counting.
@@ -299,6 +308,21 @@ router.post('/:id/decline', requireAuth, requireDriver, async (req: AuthRequest,
 // Must be declared BEFORE /:id so Express doesn't treat "active" as a UUID.
 router.get('/active', requireAuth, requireRider, async (req: AuthRequest, res) => {
   const LIVE_STATUSES = ['accepted', 'en_route', 'arrived', 'in_progress'];
+
+  // Data integrity check: if multiple active trips exist (TOCTOU race window),
+  // log it so it can be investigated. The DB-level fix is:
+  //   CREATE UNIQUE INDEX one_active_trip_per_rider ON trips (rider_id)
+  //   WHERE status NOT IN ('completed','cancelled');
+  const { data: allActive } = await supabase
+    .from('trips')
+    .select('id')
+    .eq('rider_id', req.userId!)
+    .in('status', LIVE_STATUSES);
+
+  if ((allActive?.length ?? 0) > 1) {
+    console.error(`[trips/active] DATA INTEGRITY: rider ${req.userId} has ${allActive!.length} concurrent active trips — investigate immediately`);
+  }
+
   const { data, error } = await supabase
     .from('trips')
     .select('id, driver_id, status, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, pickup_address, dropoff_address, fare_amount')

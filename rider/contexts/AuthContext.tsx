@@ -30,7 +30,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // TOKEN_REFRESHED only rotates the JWT — the user identity is unchanged.
+      // Calling setUser here would create a new object reference, re-running every
+      // [user]-dependent effect (restore-on-mount, profile fetch) once per hour.
+      if (event === 'TOKEN_REFRESHED') {
+        setSession(session); // update the session so getSession() returns the new token
+        return;
+      }
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);

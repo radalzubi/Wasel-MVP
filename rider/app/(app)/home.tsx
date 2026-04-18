@@ -55,12 +55,18 @@ export default function HomeScreen() {
   const { t } = useLanguage();
   const mapRef = useRef<MapView>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suggestAbortRef = useRef<AbortController | null>(null);
   const destInputRef = useRef<TextInput>(null);
   const pickupInputRef = useRef<TextInput>(null);
   // Throttle map viewport auto-fit to prevent excessive animations
   const lastFitRef = useRef<number>(0);
   // Tracks whether the user cancelled while a trip request was in-flight
   const cancelledRef = useRef(false);
+  // Prevents concurrent trip-request calls (double-tap protection)
+  const requestInFlightRef = useRef(false);
+  // Prevents the Realtime subscribe() catch-up fetch from overwriting state
+  // that was just restored from the /active endpoint moments ago.
+  const justRestoredRef = useRef(false);
 
   // ── Location ──────────────────────────────────────────────────────────
   const [location, setLocation] = useState<LatLng | null>(null);
@@ -105,6 +111,20 @@ export default function HomeScreen() {
 
   // Cleanup: mark unmounted so in-flight async callbacks skip setState
   useEffect(() => () => { isMounted.current = false; }, []);
+
+  // Sign-out guard: when the user signs out, tear down all Realtime channels
+  // and clear trip state. Without this, channels subscribed to the previous
+  // user's trips keep firing and can write state for the wrong user session.
+  const wasSignedInRef = useRef(false);
+  useEffect(() => {
+    if (user) {
+      wasSignedInRef.current = true;
+    } else if (wasSignedInRef.current) {
+      wasSignedInRef.current = false;
+      supabase.removeAllChannels();
+      resetTripState();
+    }
+  }, [user]);
 
   // Apply destination forwarded from the Explore tab ("Ride here" button)
   useFocusEffect(
@@ -182,7 +202,7 @@ export default function HomeScreen() {
         if (res.ok && isMounted.current) setRiderProfile(await res.json());
       } catch { /* non-fatal */ }
     })();
-  }, [user]);
+  }, [user?.id]);
 
   // ── Restore active trip on mount (handles app restarts mid-trip) ─────
   // The /active endpoint only returns trips in accepted/en_route/arrived/in_progress,
@@ -195,7 +215,7 @@ export default function HomeScreen() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const token = session?.access_token;
-        if (!token) return;
+        if (!token || !isMounted.current) return;
         const res = await fetch(`${API_URL}/api/trips/active`, {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -204,6 +224,10 @@ export default function HomeScreen() {
         if (!data?.id) return;
 
         if (!isMounted.current) return;
+        // Flag: block the subscribe() catch-up fetch for 3s so it doesn't
+        // race against the state we're about to set from the restore fetch.
+        justRestoredRef.current = true;
+        setTimeout(() => { justRestoredRef.current = false; }, 3000);
         setTripId(data.id);
         setTripStatus(data.status as TripStatus);
         if (data.driver_id) setDriverId(data.driver_id);
@@ -216,7 +240,7 @@ export default function HomeScreen() {
           setDropoffCoords({ latitude: data.dropoff_lat, longitude: data.dropoff_lng });
       } catch { /* non-fatal: don't block the home screen */ }
     })();
-  }, [user]);
+  }, [user?.id]);
 
   // ── Trip Realtime subscription ────────────────────────────────────────
   useEffect(() => {
@@ -247,6 +271,9 @@ export default function HomeScreen() {
       })
       .subscribe(async () => {
         try {
+          // Skip re-fetch if a restore just completed moments ago — the restore
+          // already gave us fresh state and we would race against it.
+          if (justRestoredRef.current) return;
           const { data: { session } } = await supabase.auth.getSession();
           const token = session?.access_token;
           if (!token || !isMounted.current) return;
@@ -347,17 +374,23 @@ export default function HomeScreen() {
   // ── Nominatim autocomplete ────────────────────────────────────────────
   const fetchSuggestions = useCallback(async (query: string) => {
     if (query.length < 2) { setSuggestions([]); return; }
+    // Abort any in-flight request so out-of-order responses can't overwrite newer results
+    suggestAbortRef.current?.abort();
+    const ac = new AbortController();
+    suggestAbortRef.current = ac;
     setLoadingSuggestions(true);
     try {
       const q = encodeURIComponent(query);
-      // viewbox biases toward Jordan but bounded=0 allows global results
       const url = `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=8&viewbox=34.9,29.1,39.3,33.4&bounded=0&accept-language=en&addressdetails=1`;
-      const res = await fetch(url, { headers: { 'User-Agent': 'WaselApp/1.0' } });
+      const res = await fetch(url, { signal: ac.signal, headers: { 'User-Agent': 'WaselApp/1.0' } });
+      if (!isMounted.current) return;
       setSuggestions(await res.json());
-    } catch {
+    } catch (err: unknown) {
+      if ((err as Error)?.name === 'AbortError') return; // intentional abort, not an error
+      if (!isMounted.current) return;
       setSuggestions([]);
     } finally {
-      setLoadingSuggestions(false);
+      if (isMounted.current) setLoadingSuggestions(false);
     }
   }, []);
 
@@ -449,11 +482,15 @@ export default function HomeScreen() {
       Alert.alert(t('setPickupDropoff'), t('tapMapDest2'));
       return;
     }
+    // Double-tap guard: prevent concurrent requests (second tap while first is in-flight)
+    if (requestInFlightRef.current) return;
+    requestInFlightRef.current = true;
 
     // Token check BEFORE showing the loading state or making any request
     const { data: { session } } = await supabase.auth.getSession();
     const token = session?.access_token;
     if (!token) {
+      requestInFlightRef.current = false;
       Alert.alert(t('error'), 'Session expired. Please sign in again.');
       return;
     }
@@ -538,6 +575,8 @@ export default function HomeScreen() {
         Alert.alert(t('error'), msg);
         setTripStatus('idle');
       }
+    } finally {
+      requestInFlightRef.current = false;
     }
   }
 

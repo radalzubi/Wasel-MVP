@@ -38,7 +38,7 @@ function AuthGuard() {
     if (!user && !inAuthGroup && !inWaitlist) {
       router.replace('/(auth)/login');
     }
-  }, [user, loading]);
+  }, [user, loading, segments]);
 
   return null;
 }
