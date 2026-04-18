@@ -105,6 +105,8 @@ const translations: Record<string, Record<Language, string>> = {
   driverApproval: { en: 'Driver accounts are subject to approval', ar: 'حسابات السائقين خاضعة للموافقة' },
   drivingToPickup: { en: 'Driving to Pickup', ar: 'في الطريق لموقع الانطلاق' },
   tripComplete2: { en: 'Trip Complete', ar: 'اكتملت الرحلة' },
+  tripCancelled: { en: 'Trip Cancelled', ar: 'تم إلغاء الرحلة' },
+  riderCancelledMsg: { en: 'The rider has cancelled this trip.', ar: 'قام الراكب بإلغاء الرحلة.' },
 
   // General
   earlyMember: { en: 'Early Member', ar: 'عضو مبكر' },

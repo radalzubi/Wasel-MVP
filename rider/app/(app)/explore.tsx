@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  RefreshControl, ScrollView, Platform,
+  RefreshControl, ScrollView, Platform, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { supabase } from '../../lib/supabase';
 
@@ -74,6 +75,7 @@ function SkeletonCard() {
 }
 
 export default function ExploreScreen() {
+  const router = useRouter();
   const { t, language } = useLanguage();
   const [places, setPlaces] = useState<Place[]>([]);
   const [cached, setCached] = useState<Place[]>([]);
@@ -132,6 +134,30 @@ export default function ExploreScreen() {
     return place.address;
   }
 
+  async function handleRideHere(place: Place) {
+    const address = getPlaceAddress(place) || getPlaceName(place);
+    try {
+      const q = encodeURIComponent(address + ' Jordan');
+      const url = `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1&viewbox=34.9,29.1,39.3,33.4&bounded=0`;
+      const res = await fetch(url, { headers: { 'User-Agent': 'WaselApp/1.0' } });
+      const json = await res.json();
+      if (json && json.length > 0) {
+        router.navigate({
+          pathname: '/(app)/home' as any,
+          params: {
+            destName: getPlaceName(place),
+            destLat: json[0].lat,
+            destLng: json[0].lon,
+          },
+        });
+      } else {
+        Alert.alert('Not found', 'Could not locate this place on the map. Try searching manually.');
+      }
+    } catch {
+      Alert.alert('Error', 'Could not get directions to this place.');
+    }
+  }
+
   function renderPlace({ item }: { item: Place }) {
     return (
       <View style={styles.card}>
@@ -148,6 +174,14 @@ export default function ExploreScreen() {
             {item.price_range != null && <PriceRange value={item.price_range} />}
           </View>
         </View>
+        <TouchableOpacity
+          style={styles.rideBtn}
+          onPress={() => handleRideHere(item)}
+          activeOpacity={0.75}
+        >
+          <Ionicons name="car-outline" size={16} color="#000" />
+          <Text style={styles.rideBtnText}>Ride</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -286,5 +320,20 @@ const styles = StyleSheet.create({
   skeletonLine: {
     height: 14, backgroundColor: '#1E1E1E', borderRadius: 7,
     width: '80%',
+  },
+  rideBtn: {
+    backgroundColor: '#F5A623',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+    minWidth: 52,
+  },
+  rideBtnText: {
+    color: '#000',
+    fontSize: 10,
+    fontWeight: '700',
   },
 });

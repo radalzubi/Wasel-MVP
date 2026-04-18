@@ -10,11 +10,11 @@ const router = Router();
 // ----------------------------------------------------------------
 
 const PhoneSchema = z.object({
-  phone: z.string().regex(/^\+9627[789]\d{7}$/, 'Must be a valid Jordanian mobile number (+9627XXXXXXXX)'),
+  phone: z.string().regex(/^\+[1-9]\d{6,14}$/, 'Phone must be in international format (e.g. +962790000003 or +12125551234)'),
 });
 
 const VerifySchema = z.object({
-  phone: z.string().regex(/^\+9627[789]\d{7}$/),
+  phone: z.string().regex(/^\+[1-9]\d{6,14}$/),
   token: z.string().length(6).regex(/^\d{6}$/, 'OTP must be 6 digits'),
   role: z.enum(['rider', 'driver']),
 });
@@ -23,9 +23,7 @@ const VerifySchema = z.object({
 // Dev / test user constants
 // ----------------------------------------------------------------
 
-/** Test phones that bypass real OTP in non-production environments.
- *  Must match the Jordanian regex: +9627[789]\d{7}
- *  +962 79 0000001 = valid format (9 digits after country code) */
+/** Test phones that bypass real OTP in non-production environments. */
 const TEST_PHONES = new Set(['+962790000001', '+962790000002']);
 const TEST_OTP   = '123456';
 

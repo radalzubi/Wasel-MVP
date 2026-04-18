@@ -5,6 +5,11 @@ import { bmpScore, DriverCandidate } from './scoring';
 const OFFER_TIMEOUT_SECONDS = 15;
 const MAX_SEARCH_RADIUS_KM  = 10;
 
+// In development, ignore geographic distance so cross-region testing works
+// (e.g. driver in Indiana, rider in Amman).  Production always uses the real radius.
+const EFFECTIVE_RADIUS_KM =
+  process.env.NODE_ENV === 'development' ? 99_999 : MAX_SEARCH_RADIUS_KM;
+
 // P6: Maximum dispatch rounds before a trip is auto-cancelled.
 // Exported so the poller and dispatchTrip use the same constant.
 export const MAX_DISPATCH_ROUNDS = 5;
@@ -93,7 +98,7 @@ export async function dispatchTrip(
     .map((d) => {
       if (d.location_lat == null || d.location_lng == null) return null;
       const distKm = haversineKm(pickupLat, pickupLng, d.location_lat, d.location_lng);
-      if (distKm > MAX_SEARCH_RADIUS_KM) return null;
+      if (distKm > EFFECTIVE_RADIUS_KM) return null;
 
       // P5: Effective tier = active subscription tier if present,
       //     otherwise fall back to the column value (admin-set default).

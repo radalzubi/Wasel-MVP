@@ -66,20 +66,22 @@ export default function LoginScreen() {
         <Text style={styles.title}>{t('enterPhone')}</Text>
         <Text style={styles.subtitle}>{t('sendCodeSubtitle')}</Text>
 
-        <View style={styles.inputRow}>
-          <View style={styles.countryCode}>
-            <Text style={styles.countryCodeText}>+962</Text>
-          </View>
-          <TextInput
-            style={styles.input}
-            placeholder={t('phonePlaceholder')}
-            placeholderTextColor="#555"
-            value={phone}
-            onChangeText={setPhone}
-            keyboardType="phone-pad"
-            autoFocus
-          />
-        </View>
+        <TextInput
+          style={styles.phoneInput}
+          placeholder="+962 7X XXX XXXX"
+          placeholderTextColor="#555"
+          value={phone}
+          onChangeText={(text) => {
+            // Auto-prepend + if user starts typing without it
+            if (text.length === 1 && text !== '+') {
+              setPhone('+' + text);
+            } else {
+              setPhone(text);
+            }
+          }}
+          keyboardType="phone-pad"
+          autoFocus
+        />
 
         <TouchableOpacity
           style={[styles.button, loading && styles.buttonDisabled]}
@@ -98,11 +100,11 @@ export default function LoginScreen() {
         {__DEV__ && (
           <TouchableOpacity
             style={styles.devHint}
-            onPress={() => setPhone('790000001')}
+            onPress={() => setPhone('+962790000001')}
             activeOpacity={0.7}
           >
             <Text style={styles.devHintText}>
-              Dev mode · Phone: +962790000001 · Code: 123456
+              Dev · Tap to use test rider: +962790000001 / OTP: 123456
             </Text>
             <Text style={styles.devHintSub}>Tap to pre-fill phone</Text>
           </TouchableOpacity>
@@ -148,6 +150,18 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: '#FFF',
     letterSpacing: 2,
+  },
+  phoneInput: {
+    backgroundColor: '#161616',
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 18,
+    color: '#FFF',
+    letterSpacing: 1,
+    marginBottom: 20,
   },
   button: {
     backgroundColor: '#F5A623',

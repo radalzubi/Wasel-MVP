@@ -148,6 +148,35 @@ export default function DashboardScreen() {
     return () => clearInterval(interval);
   }, [isOnline, user]);
 
+  // Subscribe to active trip status changes — handles rider-initiated cancellation.
+  // When a rider cancels mid-trip (en_route / arrived / in_progress), the trips row
+  // transitions to 'cancelled'.  Without this subscription the driver UI gets stuck
+  // showing active-trip controls that will fail with 409 / 403 on the next tap.
+  useEffect(() => {
+    if (!currentTrip) return;
+
+    const channel = supabase
+      .channel(`trip-updates-${currentTrip.id}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'trips',
+        filter: `id=eq.${currentTrip.id}`,
+      }, (payload) => {
+        const newStatus = (payload.new as { status?: string })?.status;
+        if (newStatus === 'cancelled') {
+          setCurrentTrip(null);
+          Alert.alert(
+            t('tripCancelled') || 'Trip Cancelled',
+            t('riderCancelledMsg') || 'The rider has cancelled this trip.',
+          );
+        }
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [currentTrip?.id]);
+
   // Subscribe to trip_offers via Supabase Realtime
   useEffect(() => {
     if (!user) return;
