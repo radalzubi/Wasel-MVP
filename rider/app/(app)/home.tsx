@@ -93,12 +93,18 @@ export default function HomeScreen() {
   // ── Profile ───────────────────────────────────────────────────────────
   const [riderProfile, setRiderProfile] = useState<RiderProfile | null>(null);
 
+  // Prevents setState after unmount (crash fix)
+  const isMounted = useRef(true);
+
   const { destName, destLat, destLng } = useLocalSearchParams<{
     destName?: string;
     destLat?: string;
     destLng?: string;
   }>();
   const consumedExploreParams = useRef(false);
+
+  // Cleanup: mark unmounted so in-flight async callbacks skip setState
+  useEffect(() => () => { isMounted.current = false; }, []);
 
   // Apply destination forwarded from the Explore tab ("Ride here" button)
   useFocusEffect(
@@ -164,19 +170,19 @@ export default function HomeScreen() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const token = session?.access_token;
-        if (!token) return;
+        if (!token || !isMounted.current) return;
         const res = await fetch(`${API_URL}/api/riders/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (res.ok) setRiderProfile(await res.json());
+        if (res.ok && isMounted.current) setRiderProfile(await res.json());
       } catch { /* non-fatal */ }
     })();
   }, [user]);
 
   // ── Restore active trip on mount (handles app restarts mid-trip) ─────
-  // Without this, a rider who restarts the app mid-trip sees the home screen
-  // with no trip state, but their backend trip is still active — so every new
-  // "Request" gets a 409 and they can't cancel because tripId is null.
+  // Only restore trips where a driver is already actively assigned.
+  // Stale "requested"/"dispatching" trips (stuck from previous sessions) are
+  // silently cancelled so the rider isn't locked into a ghost trip.
   useEffect(() => {
     if (!user) return;
     (async () => {
@@ -190,7 +196,20 @@ export default function HomeScreen() {
         if (!res.ok) return;
         const data = await res.json();
         if (!data?.id) return;
-        // Restore full trip state
+
+        // Live states — driver is actively assigned, safe to restore
+        const liveStatuses: TripStatus[] = ['accepted', 'en_route', 'arrived', 'in_progress'];
+        if (!liveStatuses.includes(data.status as TripStatus)) {
+          // Cancel any stale pre-dispatch trip so it doesn't block future requests
+          await fetch(`${API_URL}/api/trips/${data.id}/status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ status: 'cancelled' }),
+          }).catch(() => {});
+          return;
+        }
+
+        if (!isMounted.current) return;
         setTripId(data.id);
         setTripStatus(data.status as TripStatus);
         if (data.driver_id) setDriverId(data.driver_id);
@@ -214,33 +233,39 @@ export default function HomeScreen() {
         event: 'UPDATE', schema: 'public', table: 'trips',
         filter: `id=eq.${tripId}`,
       }, (payload) => {
-        const st = payload.new.status as TripStatus;
-        const did = payload.new.driver_id as string | null;
-        setTripStatus(st);
-        if (did) setDriverId(did);
-        if (st === 'completed') {
-          setRatingTripId(tripId);
-          setRatingStars(0);
-          setShowRatingModal(true);
-        } else if (st === 'cancelled') {
-          // Show "Trip cancelled" briefly then return to idle
-          setTimeout(resetTripState, 1500);
+        try {
+          if (!isMounted.current) return;
+          const st = payload.new.status as TripStatus;
+          const did = payload.new.driver_id as string | null;
+          setTripStatus(st);
+          if (did) setDriverId(did);
+          if (st === 'completed') {
+            setRatingTripId(tripId);
+            setRatingStars(0);
+            setShowRatingModal(true);
+          } else if (st === 'cancelled') {
+            // Show "Trip cancelled" briefly then return to idle
+            setTimeout(() => { if (isMounted.current) resetTripState(); }, 1500);
+          }
+        } catch (err) {
+          console.error('[trip-sub] payload error:', err);
         }
       })
       .subscribe(async () => {
         try {
           const { data: { session } } = await supabase.auth.getSession();
           const token = session?.access_token;
-          if (!token) return;
+          if (!token || !isMounted.current) return;
           const res = await fetch(`${API_URL}/api/trips/${tripId}`, {
             headers: { Authorization: `Bearer ${token}` },
           });
-          if (res.ok) {
-            const data = await res.json();
-            if (data.status && data.status !== 'requested') setTripStatus(data.status as TripStatus);
-            if (data.driver_id) setDriverId(data.driver_id);
-          }
-        } catch { /* non-fatal */ }
+          if (!res.ok || !isMounted.current) return;
+          const data = await res.json();
+          if (data.status && data.status !== 'requested') setTripStatus(data.status as TripStatus);
+          if (data.driver_id) setDriverId(data.driver_id);
+        } catch (err) {
+          console.error('[trip-sub] subscribe fetch error:', err);
+        }
       });
     return () => { supabase.removeChannel(ch); };
   }, [tripId]);
@@ -255,19 +280,26 @@ export default function HomeScreen() {
         event: 'UPDATE', schema: 'public', table: 'drivers',
         filter: `id=eq.${driverId}`,
       }, (payload) => {
-        const lat = payload.new.location_lat as number | null;
-        const lng = payload.new.location_lng as number | null;
-        if (lat != null && lng != null) setDriverLocation({ latitude: lat, longitude: lng });
+        try {
+          if (!isMounted.current) return;
+          const lat = payload.new.location_lat as number | null;
+          const lng = payload.new.location_lng as number | null;
+          if (lat != null && lng != null) setDriverLocation({ latitude: lat, longitude: lng });
+        } catch (err) {
+          console.error('[driver-loc-sub] payload error:', err);
+        }
       })
       .subscribe(async () => {
         try {
           const { data } = await supabase
             .from('drivers').select('location_lat, location_lng')
             .eq('id', driverId).single();
-          if (data?.location_lat != null && data?.location_lng != null) {
+          if (data?.location_lat != null && data?.location_lng != null && isMounted.current) {
             setDriverLocation({ latitude: data.location_lat, longitude: data.location_lng });
           }
-        } catch { /* non-fatal */ }
+        } catch (err) {
+          console.error('[driver-loc-sub] subscribe fetch error:', err);
+        }
       });
     return () => { supabase.removeChannel(ch); };
   }, [driverId, tripStatus]);
@@ -282,6 +314,7 @@ export default function HomeScreen() {
           .select('name, phone, vehicle_make, vehicle_model, vehicle_plate')
           .eq('id', driverId)
           .single();
+        if (!isMounted.current) return;
         if (data?.name) setDriverName(data.name);
         if (data?.phone) setDriverPhone(data.phone);
         const veh = [data?.vehicle_make, data?.vehicle_model].filter(Boolean).join(' ');
