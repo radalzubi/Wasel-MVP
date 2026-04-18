@@ -41,16 +41,6 @@ export default function DriverVerifyScreen() {
       const data = await res.json();
       setLoading(false);
 
-      if (res.status === 403) {
-        // Backend deliberately omits the session on 403 — do not store credentials
-        // for an unapproved driver. Show an informational alert and stay on this screen.
-        Alert.alert(
-          'Account Pending Approval',
-          'Your driver account is under review. Contact Wasel support to get approved.',
-        );
-        return;
-      }
-
       if (!res.ok) {
         Alert.alert('Invalid code', data.error || 'Please check the code and try again.');
         return;
@@ -61,7 +51,11 @@ export default function DriverVerifyScreen() {
         refresh_token: data.session.refresh_token,
       });
 
-      // Driver profiles are created by admin onboarding — do not auto-create here.
+      if (data.status === 'pending_registration') {
+        router.replace('/(auth)/register' as any);
+        return;
+      }
+
       router.replace('/(app)/dashboard');
     } catch (err) {
       setLoading(false);

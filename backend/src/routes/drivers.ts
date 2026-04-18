@@ -96,4 +96,49 @@ router.patch('/push-token', requireAuth, requireDriver, async (req: AuthRequest,
   res.json({ ok: true });
 });
 
+const RegisterSchema = z.object({
+  name:          z.string().min(2).max(80),
+  vehicle_make:  z.string().min(1).max(40),
+  vehicle_model: z.string().min(1).max(40),
+  vehicle_plate: z.string().min(2).max(20),
+});
+
+// POST /api/drivers/register — first-time driver profile creation.
+// Called after OTP verify returns { status: 'pending_registration' }.
+// Creates profile with is_approved=false; admin must approve before going online.
+router.post('/register', requireAuth, async (req: AuthRequest, res) => {
+  // Prevent overwriting an existing approved profile.
+  const { data: existing } = await supabase
+    .from('drivers')
+    .select('id')
+    .eq('id', req.userId)
+    .maybeSingle();
+  if (existing) return res.status(409).json({ error: 'Driver profile already exists' });
+
+  const parsed = RegisterSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  // Get the phone number from the auth user record.
+  const { data: authUser } = await supabase.auth.admin.getUserById(req.userId!);
+  const phone = authUser?.user?.phone ?? '';
+
+  const { error } = await supabase.from('drivers').insert({
+    id:            req.userId,
+    phone,
+    name:          parsed.data.name,
+    vehicle_make:  parsed.data.vehicle_make,
+    vehicle_model: parsed.data.vehicle_model,
+    vehicle_plate: parsed.data.vehicle_plate.toUpperCase(),
+    is_approved:   false,
+    is_online:     false,
+    is_available:  false,
+  });
+
+  if (error) {
+    console.error('[drivers/register] insert error:', error.message);
+    return res.status(500).json({ error: 'Failed to create driver profile' });
+  }
+  res.status(201).json({ ok: true, status: 'pending_approval' });
+});
+
 export default router;

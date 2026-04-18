@@ -86,6 +86,7 @@ export default function DashboardScreen() {
   const isMounted = useRef(true);
 
   const [isOnline, setIsOnline]               = useState(false);
+  const [isApproved, setIsApproved]           = useState<boolean>(true);
   const [location, setLocation]               = useState<LatLng | null>(null);
   const [offer, setOffer]                     = useState<TripOffer | null>(null);
   const [offerTimer, setOfferTimer]           = useState(15);
@@ -185,6 +186,7 @@ export default function DashboardScreen() {
         if (res.ok && isMounted.current) {
           const data = await res.json();
           setSubscriptionTier(data.subscription_tier ?? 1);
+          setIsApproved(data.is_approved ?? false);
         }
       } catch { /* non-fatal */ }
     })();
@@ -636,13 +638,16 @@ export default function DashboardScreen() {
                 <Text style={styles.offlineTitle}>You're Offline</Text>
                 <Text style={styles.offlineSub}>Go online to start accepting trips</Text>
                 <TouchableOpacity
-                  style={styles.goOnlineBtn}
-                  onPress={() => toggleOnline(true)}
-                  activeOpacity={0.85}
+                  style={[styles.goOnlineBtn, !isApproved && styles.goOnlineBtnDisabled]}
+                  onPress={() => isApproved && toggleOnline(true)}
+                  activeOpacity={isApproved ? 0.85 : 1}
                 >
                   <Ionicons name="power" size={20} color="#000" />
                   <Text style={styles.goOnlineBtnText}>Go Online</Text>
                 </TouchableOpacity>
+                {!isApproved && (
+                  <Text style={styles.pendingApprovalText}>Account pending approval</Text>
+                )}
               </View>
             ) : (
               /* Online — status + go offline toggle */
@@ -895,6 +900,8 @@ const styles = StyleSheet.create({
     width: '100%', justifyContent: 'center',
   },
   goOnlineBtnText: { color: '#000', fontWeight: '800', fontSize: 18 },
+  goOnlineBtnDisabled: { opacity: 0.4 },
+  pendingApprovalText: { color: '#F5A623', fontSize: 12, textAlign: 'center', marginTop: 8 },
 
   // Online idle state
   onlineRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
