@@ -9,6 +9,7 @@
     "web": "expo start --web"
   },
   "dependencies": {
+    "@mapbox/polyline": "^1.2.1",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@supabase/supabase-js": "^2.103.3",
     "expo": "~54.0.33",
@@ -27,6 +28,7 @@
     "react-native-url-polyfill": "^3.0.0"
   },
   "devDependencies": {
+    "@types/mapbox__polyline": "^1.0.5",
     "@types/react": "~19.1.0",
     "typescript": "~5.9.2"
   },

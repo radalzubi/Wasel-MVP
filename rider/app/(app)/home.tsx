@@ -5,6 +5,7 @@ import {
   Modal, KeyboardAvoidingView, ScrollView, Linking,
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import PolylineDecoder from '@mapbox/polyline';
 import * as Location from 'expo-location';
 import { DARK_MAP_STYLE } from '../../lib/mapStyle';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -53,6 +54,7 @@ interface RiderProfile { is_waitlist_member?: boolean; }
 
 export default function HomeScreen() {
   const { user } = useAuth();
+
   const { t } = useLanguage();
   const mapRef = useRef<MapView>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -94,6 +96,7 @@ export default function HomeScreen() {
   const [driverPhone, setDriverPhone] = useState<string | null>(null);
   const [driverVehicle, setDriverVehicle] = useState<string | null>(null);
   const [fare, setFare] = useState<string | null>(null);
+  const [routePolyline, setRoutePolyline] = useState<string | null>(null);
 
   // ── Rating modal ──────────────────────────────────────────────────────
   const [showRatingModal, setShowRatingModal] = useState(false);
@@ -155,6 +158,10 @@ export default function HomeScreen() {
           coords.latitude, coords.longitude,
         );
         setFare(Math.max(1.5, 0.5 + dist * 0.35).toFixed(2));
+        fetchEstimate(
+          pickupCoords.latitude, pickupCoords.longitude,
+          coords.latitude, coords.longitude,
+        );
         setTimeout(() => {
           if (!isMounted.current) return;
           mapRef.current?.fitToCoordinates([pickupCoords, coords], {
@@ -198,6 +205,31 @@ export default function HomeScreen() {
     setPickupCoords(AMMAN);
     setPickup('Amman, Jordan');
     mapRef.current?.animateToRegion({ ...AMMAN, latitudeDelta: 0.05, longitudeDelta: 0.05 }, 800);
+  }
+
+  // ── Fetch fare estimate + real polyline from backend ─────────────────
+  async function fetchEstimate(
+    pickupLat: number,
+    pickupLng: number,
+    dropLat: number,
+    dropLng: number,
+  ) {
+    try {
+      const url =
+        `${API_URL}/api/trips/estimate` +
+        `?pickup_lat=${pickupLat}&pickup_lng=${pickupLng}` +
+        `&dropoff_lat=${dropLat}&dropoff_lng=${dropLng}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: { fare_jd: number; polyline: string | null } = await res.json();
+      if (!isMounted.current) return;
+      setFare(data.fare_jd.toFixed(2));
+      setRoutePolyline(data.polyline ?? null);
+    } catch {
+      // Fallback: keep the client-side haversine fare already set; clear polyline
+      // so the straight-line fallback renders on the map.
+      if (isMounted.current) setRoutePolyline(null);
+    }
   }
 
   // ── Rider profile ─────────────────────────────────────────────────────
@@ -449,11 +481,17 @@ export default function HomeScreen() {
       Keyboard.dismiss();
       setSearchMode('confirmed');
       if (pickupCoords) {
+        // Set a client-side haversine fare immediately so the UI is not empty,
+        // then replace it with the server estimate (which may include a real polyline).
         const dist = haversineKm(
           pickupCoords.latitude, pickupCoords.longitude,
           coords.latitude, coords.longitude,
         );
         setFare(Math.max(1.5, 0.5 + dist * 0.35).toFixed(2));
+        fetchEstimate(
+          pickupCoords.latitude, pickupCoords.longitude,
+          coords.latitude, coords.longitude,
+        );
         setTimeout(() => {
           if (!isMounted.current) return;
           mapRef.current?.fitToCoordinates([pickupCoords, coords], {
@@ -493,6 +531,10 @@ export default function HomeScreen() {
           coords.latitude, coords.longitude,
         );
         setFare(Math.max(1.5, 0.5 + dist * 0.35).toFixed(2));
+        fetchEstimate(
+          pickupCoords.latitude, pickupCoords.longitude,
+          coords.latitude, coords.longitude,
+        );
       }
     }
   }
@@ -640,6 +682,7 @@ export default function HomeScreen() {
     setDropoff('');
     setDropoffCoords(null);
     setFare(null);
+    setRoutePolyline(null);
     setSuggestions([]);
     setSearchMode('idle');
     lastFitRef.current = 0;
@@ -729,12 +772,23 @@ export default function HomeScreen() {
             lineDashPattern={[6, 3]}
           />
         ) : (pickupCoords && dropoffCoords && (
-          <Polyline
-            coordinates={[pickupCoords, dropoffCoords]}
-            strokeColor="#F5A623"
-            strokeWidth={2}
-            lineDashPattern={[8, 4]}
-          />
+          routePolyline ? (
+            <Polyline
+              coordinates={PolylineDecoder.decode(routePolyline).map(([lat, lng]: [number, number]) => ({
+                latitude: lat,
+                longitude: lng,
+              }))}
+              strokeColor="#F5A623"
+              strokeWidth={3}
+            />
+          ) : (
+            <Polyline
+              coordinates={[pickupCoords, dropoffCoords]}
+              strokeColor="#F5A623"
+              strokeWidth={2}
+              lineDashPattern={[8, 4]}
+            />
+          )
         ))}
       </MapView>
 
