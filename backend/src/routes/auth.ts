@@ -171,11 +171,14 @@ router.post('/send-otp', otpLimiter, async (req, res) => {
 
   const { phone } = parsed.data;
 
-  // Dev bypass: skip real OTP for test phones only in explicitly allowed envs.
-  // Using an allowlist (not a denylist) so the bypass stays inactive when
-  // NODE_ENV is unset or set to an unrecognised value.
-  const isDevEnv = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
-  if (isDevEnv && TEST_PHONES.has(phone)) {
+  // Test-account bypass: skip real OTP for hardcoded test phones.
+  // Controlled by TEST_BYPASS_ENABLED env var, independent of NODE_ENV so
+  // Railway can run NODE_ENV=production while still allowing test logins.
+  const isTestBypassEnabled =
+    process.env.NODE_ENV === 'development' ||
+    process.env.NODE_ENV === 'test' ||
+    process.env.TEST_BYPASS_ENABLED === 'true';
+  if (isTestBypassEnabled && TEST_PHONES.has(phone)) {
     return res.json({ message: 'OTP sent' });
   }
 
@@ -202,11 +205,14 @@ router.post('/verify', otpLimiter, async (req, res) => {
   const { phone, token, role } = parsed.data;
 
   // ------------------------------------------------------------------
-  // Dev bypass: test phones + magic OTP skip real Supabase verification.
-  // Allowlist only — bypass stays inactive when NODE_ENV is unset.
+  // Test-account bypass: hardcoded phones + magic OTP.
+  // Controlled by TEST_BYPASS_ENABLED, independent of NODE_ENV.
   // ------------------------------------------------------------------
-  const isDevEnv = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
-  if (isDevEnv && TEST_PHONES.has(phone) && token === TEST_OTP) {
+  const isTestBypassEnabled =
+    process.env.NODE_ENV === 'development' ||
+    process.env.NODE_ENV === 'test' ||
+    process.env.TEST_BYPASS_ENABLED === 'true';
+  if (isTestBypassEnabled && TEST_PHONES.has(phone) && token === TEST_OTP) {
     const devUser = devUserForPhone(phone)!;
     const creds   = DEV_USERS[devUser.role];
 
@@ -315,8 +321,13 @@ router.post('/verify', otpLimiter, async (req, res) => {
 router.post('/dev-login', otpLimiter, async (req, res) => {
   // Allowlist pattern (same as OTP bypass) — unset or unrecognised NODE_ENV is treated
   // as production-equivalent so the endpoint stays closed on misconfigured deploys.
-  const isDevEnv = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
-  if (!isDevEnv) {
+  // Controlled by TEST_BYPASS_ENABLED env var, independent of NODE_ENV so Railway
+  // can run NODE_ENV=production while still allowing test logins when explicitly enabled.
+  const isTestBypassEnabled =
+    process.env.NODE_ENV === 'development' ||
+    process.env.NODE_ENV === 'test' ||
+    process.env.TEST_BYPASS_ENABLED === 'true';
+  if (!isTestBypassEnabled) {
     return res.status(404).json({ error: 'Not found' });
   }
 
