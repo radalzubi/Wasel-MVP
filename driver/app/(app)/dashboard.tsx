@@ -265,7 +265,26 @@ export default function DashboardScreen() {
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ is_online: value, is_available: value }),
       });
-      if (!res.ok) setIsOnline(prevOnline); // revert on error response
+      if (!res.ok) { setIsOnline(prevOnline); return; }
+
+      // Send an immediate location ping when going online so the dispatch engine
+      // can find this driver right away (the background interval fires after 10 s).
+      if (value) {
+        try {
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+          setLocation(coords);
+          if (token) {
+            await fetch(`${API_URL}/api/drivers/location`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+              body: JSON.stringify({ lat: coords.latitude, lng: coords.longitude }),
+            });
+          }
+        } catch {
+          // Non-fatal — the 10s interval will pick it up shortly
+        }
+      }
     } catch {
       setIsOnline(prevOnline); // revert on network error
     }

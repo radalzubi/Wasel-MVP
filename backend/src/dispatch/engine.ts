@@ -5,10 +5,15 @@ import { bmpScore, DriverCandidate } from './scoring';
 const OFFER_TIMEOUT_SECONDS = 15;
 const MAX_SEARCH_RADIUS_KM  = 10;
 
-// In development, ignore geographic distance so cross-region testing works
-// (e.g. driver in Indiana, rider in Amman).  Production always uses the real radius.
+// When TEST_BYPASS_ENABLED is set (or NODE_ENV is dev/test), ignore geographic
+// distance so cross-region testing works (e.g. driver in Indiana, rider in Amman).
+// Production deployments without the flag always use the real radius.
 const EFFECTIVE_RADIUS_KM =
-  process.env.NODE_ENV === 'development' ? 99_999 : MAX_SEARCH_RADIUS_KM;
+  process.env.NODE_ENV === 'development' ||
+  process.env.NODE_ENV === 'test' ||
+  process.env.TEST_BYPASS_ENABLED === 'true'
+    ? 99_999
+    : MAX_SEARCH_RADIUS_KM;
 
 // P6: Maximum dispatch rounds before a trip is auto-cancelled.
 // Exported so the poller and dispatchTrip use the same constant.
@@ -69,7 +74,8 @@ export async function dispatchTrip(
     .eq('is_available', true);
 
   if (error || !drivers?.length) {
-    await supabase.from('trips').update({ status: 'cancelled' }).eq('id', tripId);
+    // No online/available drivers right now — leave the trip in its current state
+    // so the poller can retry once drivers come online.
     return null;
   }
 
@@ -123,7 +129,7 @@ export async function dispatchTrip(
     .sort((a, b) => b.score - a.score);
 
   if (!scored.length) {
-    await supabase.from('trips').update({ status: 'cancelled' }).eq('id', tripId);
+    // All nearby drivers already received an offer — let the poller retry.
     return null;
   }
 
@@ -178,6 +184,30 @@ export function startDispatchPoller(): ReturnType<typeof setInterval> {
         console.error('[dispatch-poller] query error:', queryErr.message);
         return;
       }
+      // ── Retry trips stuck in 'requested' (no offer created yet) ──────────
+      // This handles the case where dispatchTrip returned null (no drivers
+      // available) without creating an offer, leaving the trip in 'requested'.
+      const REQUESTED_GRACE_MS  = POLLER_INTERVAL_MS * 2;   // 10s grace before first retry
+      const MAX_REQUESTED_AGE_MS = MAX_DISPATCH_ROUNDS * OFFER_TIMEOUT_SECONDS * 1_000 + 30_000;
+
+      const requestedCutoff = new Date(Date.now() - REQUESTED_GRACE_MS).toISOString();
+      const { data: stuckTrips } = await supabase
+        .from('trips')
+        .select('id, pickup_lat, pickup_lng, created_at')
+        .eq('status', 'requested')
+        .lt('created_at', requestedCutoff);
+
+      for (const trip of stuckTrips ?? []) {
+        const ageMs = Date.now() - new Date(trip.created_at).getTime();
+        if (ageMs > MAX_REQUESTED_AGE_MS) {
+          await supabase.from('trips').update({ status: 'cancelled' }).eq('id', trip.id);
+          console.log(`[dispatch-poller] trip ${trip.id} cancelled — no driver found after ${Math.round(ageMs / 1000)}s`);
+          continue;
+        }
+        dispatchTrip(trip.id, trip.pickup_lat, trip.pickup_lng)
+          .catch((err) => console.error('[dispatch-poller] requested-retry error:', err));
+      }
+
       if (!expiredOffers?.length) return;
 
       for (const offer of expiredOffers) {

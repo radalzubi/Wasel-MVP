@@ -135,6 +135,11 @@ async function ensureDevDriverProfile(userId: string, phone: string): Promise<vo
     vehicle_plate:     'TEST-001',
     subscription_tier: 2,
     became_available_at: new Date().toISOString(),
+    // Default to Amman city centre so the dispatch engine can locate this driver
+    // immediately after login, before the first real GPS ping (sent 10s after
+    // the driver goes online in the dashboard).
+    location_lat:      31.9539,
+    location_lng:      35.9106,
   }, { onConflict: 'id' });
 
   if (error) {

@@ -24,6 +24,8 @@ interface Place {
   image_emoji?: string; // kept for API compatibility, not rendered
   rating?: number;
   price_range?: string; // e.g. '$', '$$', '$$$', 'Free'
+  lat?: number;
+  lng?: number;
 }
 
 const CATEGORIES: { key: Category; labelKey: string }[] = [
@@ -134,27 +136,19 @@ export default function ExploreScreen() {
     return place.address;
   }
 
-  async function handleRideHere(place: Place) {
-    const address = getPlaceAddress(place) || getPlaceName(place);
-    try {
-      const q = encodeURIComponent(address + ' Jordan');
-      const url = `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1&viewbox=34.9,29.1,39.3,33.4&bounded=0`;
-      const res = await fetch(url, { headers: { 'User-Agent': 'WaselApp/1.0' } });
-      const json = await res.json();
-      if (json && json.length > 0) {
-        router.navigate({
-          pathname: '/(app)/home' as any,
-          params: {
-            destName: getPlaceName(place),
-            destLat: json[0].lat,
-            destLng: json[0].lon,
-          },
-        });
-      } else {
-        Alert.alert('Not found', 'Could not locate this place on the map. Try searching manually.');
-      }
-    } catch {
-      Alert.alert('Error', 'Could not get directions to this place.');
+  function handleRideHere(place: Place) {
+    // Use the lat/lng already embedded in the backend response — no geocoding needed.
+    if (place.lat != null && place.lng != null) {
+      router.navigate({
+        pathname: '/(app)/home' as any,
+        params: {
+          destName: getPlaceName(place),
+          destLat:  String(place.lat),
+          destLng:  String(place.lng),
+        },
+      });
+    } else {
+      Alert.alert('Not available', 'Location data missing for this place. Try searching manually.');
     }
   }
 

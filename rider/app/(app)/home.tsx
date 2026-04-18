@@ -577,7 +577,7 @@ export default function HomeScreen() {
                 </View>
               )}
 
-              {tripStatus !== 'completed' && tripStatus !== 'in_progress' && (
+              {tripStatus !== 'completed' && tripStatus !== 'in_progress' && tripStatus !== 'cancelled' && (
                 <TouchableOpacity style={s.cancelBtn} onPress={handleCancelTrip} activeOpacity={0.75}>
                   <Text style={s.cancelBtnText}>{t('cancel')}</Text>
                 </TouchableOpacity>
