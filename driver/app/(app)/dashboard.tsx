@@ -16,6 +16,21 @@ import { supabase } from '../../lib/supabase';
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 const AMMAN = { latitude: 31.9539, longitude: 35.9106 };
 
+function openNavigation(lat: number, lng: number, address?: string | null) {
+  const googleUrlIos = `comgooglemaps://?daddr=${lat},${lng}&directionsmode=driving`;
+  const googleUrlAndroid = `google.navigation:q=${lat},${lng}`;
+  const fallbackUrl = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+  const appleUrl = `maps://?daddr=${lat},${lng}`;
+
+  if (Platform.OS === 'ios') {
+    Linking.canOpenURL(googleUrlIos)
+      .then(can => Linking.openURL(can ? googleUrlIos : appleUrl))
+      .catch(() => Linking.openURL(fallbackUrl));
+  } else {
+    Linking.openURL(googleUrlAndroid).catch(() => Linking.openURL(fallbackUrl));
+  }
+}
+
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
   const dLat = (lat2 - lat1) * (Math.PI / 180);
@@ -752,6 +767,21 @@ export default function DashboardScreen() {
               );
             })()}
 
+            {currentTrip && ['accepted', 'en_route'].includes(currentTrip.status) && tripDetails && (
+              <TouchableOpacity
+                style={styles.navBtn}
+                onPress={() => openNavigation(
+                  tripDetails.pickup_lat,
+                  tripDetails.pickup_lng,
+                  tripDetails.pickup_address,
+                )}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="navigate-outline" size={18} color="#000" />
+                <Text style={styles.navBtnTxt}>Navigate</Text>
+              </TouchableOpacity>
+            )}
+
             {currentTrip.status !== 'in_progress' && (
               <TouchableOpacity
                 style={styles.cancelTripBtn}
@@ -1029,4 +1059,22 @@ const styles = StyleSheet.create({
   ratingSubmitText: { color: '#000', fontWeight: '700', fontSize: 16 },
   ratingSkipBtn: { paddingVertical: 8 },
   ratingSkipText: { color: '#444', fontSize: 14 },
+
+  // Navigate button
+  navBtn: {
+    backgroundColor: '#F5A623',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    marginTop: 8,
+  },
+  navBtnTxt: {
+    color: '#000',
+    fontWeight: '700',
+    fontSize: 15,
+  },
 });
