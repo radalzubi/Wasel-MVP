@@ -246,6 +246,51 @@ export function startDispatchPoller(): ReturnType<typeof setInterval> {
           .catch((err) => console.error('[dispatch-poller] requested-retry error:', err));
       }
 
+      // ── Safety net: 'dispatching' trips with NO pending offers ────────────────
+      // When a driver declines, the offer becomes 'declined'. The decline endpoint
+      // triggers immediate re-dispatch, but if that fails (no drivers available),
+      // the trip gets stuck in 'dispatching' indefinitely. This query catches those
+      // trips and re-attempts dispatch on each poller tick until drivers become available
+      // or the trip exceeds MAX_REQUESTED_AGE_MS.
+      const { data: stuckDispatchingTrips } = await supabase
+        .from('trips')
+        .select('id, pickup_lat, pickup_lng, created_at')
+        .eq('status', 'dispatching')
+        .lt('created_at', requestedCutoff);
+
+      for (const trip of stuckDispatchingTrips ?? []) {
+        // Check if there's already a pending offer — if so, the poller's expiry
+        // logic will handle it; don't re-dispatch and risk creating a duplicate offer.
+        const { count: pendingCount } = await supabase
+          .from('trip_offers')
+          .select('*', { count: 'exact', head: true })
+          .eq('trip_id', trip.id)
+          .eq('status', 'pending');
+
+        if ((pendingCount ?? 0) > 0) continue; // pending offer exists — wait for expiry/accept
+
+        const ageMs = Date.now() - new Date(trip.created_at).getTime();
+        if (ageMs > MAX_REQUESTED_AGE_MS) {
+          const { error: cancelErr } = await supabase
+            .from('trips').update({ status: 'cancelled' }).eq('id', trip.id);
+          if (cancelErr) {
+            console.error(`[dispatch-poller] auto-cancel of stuck-dispatching trip ${trip.id} failed:`, cancelErr.message);
+          } else {
+            console.log(`[dispatch-poller] stuck-dispatching trip ${trip.id} cancelled — exceeded max age`);
+          }
+          continue;
+        }
+
+        if (trip.pickup_lat == null || trip.pickup_lng == null) {
+          console.error(`[dispatch-poller] stuck-dispatching trip ${trip.id} has null coordinates — cancelling`);
+          await supabase.from('trips').update({ status: 'cancelled' }).eq('id', trip.id);
+          continue;
+        }
+
+        dispatchTrip(trip.id, trip.pickup_lat, trip.pickup_lng)
+          .catch(err => console.error('[dispatch-poller] stuck-dispatching retry error:', err));
+      }
+
       if (!expiredOffers?.length) return;
 
       for (const offer of expiredOffers) {

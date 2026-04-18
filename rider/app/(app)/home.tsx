@@ -506,6 +506,11 @@ export default function HomeScreen() {
     if (requestInFlightRef.current) return;
     requestInFlightRef.current = true;
 
+    // Reset cancel signals BEFORE any await so that a cancel pressed during
+    // getSession() cannot be overwritten by code running after the await resolves.
+    cancelledRef.current = false;
+    selfCancelledRef.current = false;
+
     // Token check BEFORE showing the loading state or making any request
     const { data: { session } } = await supabase.auth.getSession();
     const token = session?.access_token;
@@ -515,7 +520,6 @@ export default function HomeScreen() {
       return;
     }
 
-    cancelledRef.current = false;
     setTripStatus('searching');
 
     try {
@@ -638,8 +642,11 @@ export default function HomeScreen() {
     setSuggestions([]);
     setSearchMode('idle');
     lastFitRef.current = 0;
-    selfCancelledRef.current = false;
-    cancelledRef.current = false;
+    // NOTE: cancelledRef and selfCancelledRef are intentionally NOT reset here.
+    // cancelledRef is reset only at the start of handleRequestRide() (before any await).
+    // selfCancelledRef is reset only at the start of handleRequestRide() and in the
+    // Realtime cancelled handler (after checking it), so in-flight POST responses
+    // can still read the correct cancel signal after resetTripState() has been called.
   }
 
   async function submitRating(stars: number) {

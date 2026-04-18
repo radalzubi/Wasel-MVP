@@ -98,7 +98,7 @@ router.post('/', requireAuth, requireRider, async (req: AuthRequest, res) => {
     .from('trips')
     .select('id', { count: 'exact', head: true })
     .eq('rider_id', req.userId)
-    .not('status', 'in', '("completed","cancelled")');
+    .in('status', ['requested', 'dispatching', 'accepted', 'en_route', 'arrived', 'in_progress']);
 
   if (countErr) {
     console.error('[trips POST] active-count query failed:', countErr.message);
@@ -217,7 +217,7 @@ router.post('/:id/status', requireAuth, async (req: AuthRequest, res) => {
   if (!isValidUUID(req.params.id)) return res.status(400).json({ error: 'Invalid trip ID' });
 
   const StatusSchema = z.object({
-    status: z.enum(['dispatching', 'en_route', 'arrived', 'in_progress', 'completed', 'cancelled']),
+    status: z.enum(['en_route', 'arrived', 'in_progress', 'completed', 'cancelled']),
   });
   const parsed = StatusSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
@@ -300,6 +300,28 @@ router.post('/:id/decline', requireAuth, requireDriver, async (req: AuthRequest,
 
   if (error) return res.status(500).json({ error: 'Failed to decline offer' });
   res.json({ ok: true });
+
+  // Immediately re-dispatch to the next available driver rather than waiting for the
+  // poller's 15s timeout. Declined offers have status='declined' and the poller
+  // only processes status='pending' expired offers, so without this re-dispatch the
+  // trip would be stuck in 'dispatching' forever.
+  // Fetch trip coordinates for re-dispatch (fire-and-forget, don't block the response).
+  void supabase
+    .from('trips')
+    .select('pickup_lat, pickup_lng, status')
+    .eq('id', tripId)
+    .eq('status', 'dispatching') // only re-dispatch if still waiting for a driver
+    .maybeSingle()
+    .then(({ data: trip, error: fetchErr }) => {
+      if (fetchErr) {
+        console.error('[decline] trip-fetch for re-dispatch failed:', fetchErr.message);
+        return;
+      }
+      if (trip?.pickup_lat != null && trip?.pickup_lng != null) {
+        dispatchTrip(tripId, trip.pickup_lat, trip.pickup_lng)
+          .catch((err: unknown) => console.error('[decline] re-dispatch failed for trip', tripId, ':', err));
+      }
+    });
 });
 
 // GET /api/trips/any-pending — returns the most recent non-terminal trip for the rider,
