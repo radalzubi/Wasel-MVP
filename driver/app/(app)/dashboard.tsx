@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   Switch, Alert, Vibration, Platform, Modal, Animated, Linking, ScrollView,
@@ -14,7 +14,6 @@ import { supabase } from '../../lib/supabase';
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 const AMMAN = { latitude: 31.9539, longitude: 35.9106 };
 
-/** Haversine great-circle distance in kilometres. */
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
   const dLat = (lat2 - lat1) * (Math.PI / 180);
@@ -26,6 +25,7 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): nu
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// ── Types (module-level — not recreated on every render) ──────────────────────
 type TripStatus = 'accepted' | 'en_route' | 'arrived' | 'in_progress' | 'completed' | 'cancelled';
 
 interface TripOffer {
@@ -41,57 +41,88 @@ interface TripOffer {
 
 interface LatLng { latitude: number; longitude: number; }
 
-const TIER_META: Record<number, { label: string; price: number; color: string; text: string }> = {
-  1: { label: 'Silver',    price: 20, color: '#2A2A2A', text: '#AAA' },
-  2: { label: 'Gold',      price: 35, color: '#F5A623', text: '#000' },
-  3: { label: 'Platinum',  price: 50, color: '#8B5CF6', text: '#FFF' },
+interface RiderInfo { name: string; phone: string | null; }
+
+interface TripDetails {
+  pickup_address: string;
+  dropoff_address: string;
+  fare_amount: string;
+  pickup_lat: number;
+  pickup_lng: number;
+  dropoff_lat: number;
+  dropoff_lng: number;
+}
+
+// ── Static lookup tables (module-level — never recreated) ─────────────────────
+const TIER_META: Record<number, { label: string; color: string; text: string }> = {
+  1: { label: 'Silver',   color: '#2A2A2A', text: '#AAA' },
+  2: { label: 'Gold',     color: '#F5A623', text: '#000' },
+  3: { label: 'Platinum', color: '#8B5CF6', text: '#FFF' },
 };
 
-function getTierBadge(tier: number) {
-  return TIER_META[tier] ?? TIER_META[1];
-}
+const TRIP_ACTIONS: Record<string, { label: string; next: TripStatus }> = {
+  accepted:    { label: 'Start Drive',      next: 'en_route'    },
+  en_route:    { label: "I've Arrived",     next: 'arrived'     },
+  arrived:     { label: 'Start Trip',       next: 'in_progress' },
+  in_progress: { label: 'Complete Trip',    next: 'completed'   },
+};
+
+const TRIP_STATUS_LABEL: Record<string, string> = {
+  accepted:    'Trip Accepted',
+  en_route:    'Driving to Pickup',
+  arrived:     'Arrived at Pickup',
+  in_progress: 'Trip In Progress',
+  completed:   'Trip Complete',
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function DashboardScreen() {
   const { user } = useAuth();
   const { t } = useLanguage();
   const mapRef = useRef<MapView>(null);
+  const isMounted = useRef(true);
 
-  const [isOnline, setIsOnline] = useState(false);
-  const [location, setLocation] = useState<LatLng | null>(null);
-  const [offer, setOffer] = useState<TripOffer | null>(null);
-  const [offerTimer, setOfferTimer] = useState(15);
-  const [currentTrip, setCurrentTrip] = useState<{ id: string; status: TripStatus } | null>(null);
+  const [isOnline, setIsOnline]               = useState(false);
+  const [location, setLocation]               = useState<LatLng | null>(null);
+  const [offer, setOffer]                     = useState<TripOffer | null>(null);
+  const [offerTimer, setOfferTimer]           = useState(15);
+  const [currentTrip, setCurrentTrip]         = useState<{ id: string; status: TripStatus } | null>(null);
   const [subscriptionTier, setSubscriptionTier] = useState<number>(1);
   const [showRatingModal, setShowRatingModal] = useState(false);
-  const [ratingStars, setRatingStars] = useState(0);
-  const [ratingTripId, setRatingTripId] = useState<string | null>(null);
+  const [ratingStars, setRatingStars]         = useState(0);
+  const [ratingTripId, setRatingTripId]       = useState<string | null>(null);
+  const [riderInfo, setRiderInfo]             = useState<RiderInfo | null>(null);
+  const [tripDetails, setTripDetails]         = useState<TripDetails | null>(null);
+
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // Active trip details fetched after acceptance
-  interface RiderInfo { name: string; phone: string | null; }
-  interface TripDetails {
-    pickup_address: string;
-    dropoff_address: string;
-    fare_amount: string;
-    pickup_lat: number;
-    pickup_lng: number;
-    dropoff_lat: number;
-    dropoff_lng: number;
-  }
-  const [riderInfo, setRiderInfo] = useState<RiderInfo | null>(null);
-  const [tripDetails, setTripDetails] = useState<TripDetails | null>(null);
-
-  // Pulsing animation for urgent timer
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const pulseLoopRef = useRef<Animated.CompositeAnimation | null>(null);
 
+  // Mark unmounted so async callbacks can bail out safely
   useEffect(() => {
-    const isUrgent = offerTimer <= 5;
-    if (isUrgent && offer) {
+    isMounted.current = true;
+    return () => { isMounted.current = false; };
+  }, []);
+
+  // ── Session helper — one place to get the auth token ─────────────────────
+  const getToken = useCallback(async (): Promise<string | null> => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      return session?.access_token ?? null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  // ── Pulse animation for urgent offer timer ────────────────────────────────
+  useEffect(() => {
+    const isUrgent = offerTimer <= 5 && !!offer;
+    if (isUrgent) {
       pulseLoopRef.current = Animated.loop(
         Animated.sequence([
           Animated.timing(pulseAnim, { toValue: 0.4, duration: 300, useNativeDriver: true }),
-          Animated.timing(pulseAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 1,   duration: 300, useNativeDriver: true }),
         ]),
       );
       pulseLoopRef.current.start();
@@ -99,75 +130,73 @@ export default function DashboardScreen() {
       pulseLoopRef.current?.stop();
       pulseAnim.setValue(1);
     }
-    return () => {
-      pulseLoopRef.current?.stop();
-    };
+    return () => { pulseLoopRef.current?.stop(); };
   }, [offerTimer, offer]);
 
-  // Fetch driver profile for tier badge
+  // ── Fetch driver profile (tier badge) ────────────────────────────────────
   useEffect(() => {
+    if (!user) return;
     (async () => {
       try {
-        const session = await supabase.auth.getSession();
-        const token = session.data.session?.access_token;
+        const token = await getToken();
         if (!token) return;
         const res = await fetch(`${API_URL}/api/drivers/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (res.ok) {
+        if (res.ok && isMounted.current) {
           const data = await res.json();
           setSubscriptionTier(data.subscription_tier ?? 1);
         }
-      } catch {
-        // Non-fatal — tier badge stays at default
-      }
+      } catch { /* non-fatal */ }
     })();
-  }, [user]);
+  }, [user, getToken]);
 
-  // Get location on mount
+  // ── Initial location on mount ─────────────────────────────────────────────
   useEffect(() => {
     (async () => {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') return;
-
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        if (!isMounted.current) return;
         const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
         setLocation(coords);
         mapRef.current?.animateToRegion({ ...coords, latitudeDelta: 0.01, longitudeDelta: 0.01 }, 800);
-      } catch {
-        // Location unavailable — fall back to Amman center
-      }
+      } catch { /* location unavailable */ }
     })();
   }, []);
 
-  // Ping location every 10s when online
+  // ── Continuous location updates while online (watchPosition = no manual polling) ──
   useEffect(() => {
     if (!isOnline || !user) return;
+    let sub: Location.LocationSubscription | null = null;
 
-    const interval = setInterval(async () => {
+    (async () => {
       try {
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
-        setLocation(coords);
+        sub = await Location.watchPositionAsync(
+          { accuracy: Location.Accuracy.Balanced, timeInterval: 10_000, distanceInterval: 30 },
+          async (loc) => {
+            if (!isMounted.current) return;
+            const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+            setLocation(coords);
+            try {
+              const token = await getToken();
+              if (!token) return;
+              await fetch(`${API_URL}/api/drivers/location`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ lat: coords.latitude, lng: coords.longitude }),
+              });
+            } catch { /* non-fatal ping failure */ }
+          },
+        );
+      } catch { /* permission revoked while online */ }
+    })();
 
-        const session = await supabase.auth.getSession();
-        const token = session.data.session?.access_token;
-        if (!token) return;
-        await fetch(`${API_URL}/api/drivers/location`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify({ lat: coords.latitude, lng: coords.longitude }),
-        });
-      } catch {
-        // Non-fatal: skip this ping, try again next interval
-      }
-    }, 10000);
+    return () => { sub?.remove(); };
+  }, [isOnline, user, getToken]);
 
-    return () => clearInterval(interval);
-  }, [isOnline, user]);
-
-  // Fetch trip route + rider contact whenever a trip becomes active
+  // ── Fetch trip details + rider contact when trip accepted ─────────────────
   useEffect(() => {
     if (!currentTrip) {
       setRiderInfo(null);
@@ -176,31 +205,28 @@ export default function DashboardScreen() {
     }
     (async () => {
       try {
-        const session = await supabase.auth.getSession();
-        const token = session.data.session?.access_token;
+        const token = await getToken();
         if (!token) return;
 
-        // Trip details (addresses + coords + fare)
         const tripRes = await fetch(`${API_URL}/api/trips/${currentTrip.id}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (tripRes.ok) {
+        if (tripRes.ok && isMounted.current) {
           const d = await tripRes.json();
           setTripDetails({
             pickup_address:  d.pickup_address  ?? 'Pickup location',
             dropoff_address: d.dropoff_address ?? 'Dropoff location',
             fare_amount:     d.fare_amount != null ? `${d.fare_amount} JD` : '',
-            pickup_lat:      d.pickup_lat,
-            pickup_lng:      d.pickup_lng,
-            dropoff_lat:     d.dropoff_lat,
-            dropoff_lng:     d.dropoff_lng,
+            pickup_lat:  d.pickup_lat,
+            pickup_lng:  d.pickup_lng,
+            dropoff_lat: d.dropoff_lat,
+            dropoff_lng: d.dropoff_lng,
           });
-          // Pan map to include driver + pickup
           if (d.pickup_lat != null && d.pickup_lng != null) {
             const pickupCoord = { latitude: d.pickup_lat, longitude: d.pickup_lng };
-            const coords = location ? [location, pickupCoord] : [pickupCoord];
+            const points = location ? [location, pickupCoord] : [pickupCoord];
             setTimeout(() => {
-              mapRef.current?.fitToCoordinates(coords, {
+              mapRef.current?.fitToCoordinates(points, {
                 edgePadding: { top: 100, right: 60, bottom: 320, left: 60 },
                 animated: true,
               });
@@ -208,11 +234,10 @@ export default function DashboardScreen() {
           }
         }
 
-        // Rider contact (only available once trip is accepted)
         const contactRes = await fetch(`${API_URL}/api/trips/${currentTrip.id}/contact`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (contactRes.ok) {
+        if (contactRes.ok && isMounted.current) {
           const c = await contactRes.json();
           if (c.role === 'rider') {
             setRiderInfo({ name: c.name ?? 'Rider', phone: c.phone ?? null });
@@ -220,92 +245,88 @@ export default function DashboardScreen() {
         }
       } catch { /* non-fatal */ }
     })();
-  }, [currentTrip?.id]);
+  }, [currentTrip?.id, getToken]);
 
-  // Subscribe to active trip status changes — handles rider-initiated cancellation.
-  // When a rider cancels mid-trip (en_route / arrived / in_progress), the trips row
-  // transitions to 'cancelled'.  Without this subscription the driver UI gets stuck
-  // showing active-trip controls that will fail with 409 / 403 on the next tap.
+  // ── Realtime: rider cancels active trip ───────────────────────────────────
   useEffect(() => {
     if (!currentTrip) return;
-
     const channel = supabase
       .channel(`trip-updates-${currentTrip.id}`)
       .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'trips',
+        event: 'UPDATE', schema: 'public', table: 'trips',
         filter: `id=eq.${currentTrip.id}`,
       }, (payload) => {
-        const newStatus = (payload.new as { status?: string })?.status;
-        if (newStatus === 'cancelled') {
-          setCurrentTrip(null);
-          Alert.alert(
-            t('tripCancelled') || 'Trip Cancelled',
-            t('riderCancelledMsg') || 'The rider has cancelled this trip.',
-          );
-        }
+        try {
+          if (!isMounted.current) return;
+          const newStatus = (payload.new as { status?: string })?.status;
+          if (newStatus === 'cancelled') {
+            setCurrentTrip(null);
+            setRiderInfo(null);
+            setTripDetails(null);
+            Alert.alert('Trip Cancelled', 'The rider has cancelled this trip.');
+          }
+        } catch { /* guard against malformed payload */ }
       })
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
   }, [currentTrip?.id]);
 
-  // Subscribe to trip_offers via Supabase Realtime
+  // ── Realtime: incoming trip offers ───────────────────────────────────────
   useEffect(() => {
     if (!user) return;
-
     const channel = supabase
       .channel(`driver-offers-${user.id}`)
       .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'trip_offers',
+        event: 'INSERT', schema: 'public', table: 'trip_offers',
         filter: `driver_id=eq.${user.id}`,
-      }, async (payload) => {
-        const offerData = payload.new;
+      }, (payload) => {
+        // Wrap the entire async handler — an unhandled rejection here crashes iOS
+        (async () => {
+          try {
+            const offerData = payload.new;
+            if (!offerData?.trip_id) return;
 
-        // Fetch trip details
-        const { data: trip } = await supabase
-          .from('trips')
-          .select('pickup_address, dropoff_address, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, fare_amount')
-          .eq('id', offerData.trip_id)
-          .single();
+            const { data: trip } = await supabase
+              .from('trips')
+              .select('pickup_address, dropoff_address, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, fare_amount')
+              .eq('id', offerData.trip_id)
+              .single();
 
-        if (trip) {
-          Vibration.vibrate(Platform.OS === 'android' ? [0, 400, 200, 400] : 400);
+            if (!trip || !isMounted.current) return;
 
-          // Compute real trip distance from stored coordinates.
-          const distKm =
-            trip.pickup_lat != null && trip.pickup_lng != null &&
-            trip.dropoff_lat != null && trip.dropoff_lng != null
-              ? haversineKm(trip.pickup_lat, trip.pickup_lng, trip.dropoff_lat, trip.dropoff_lng)
-              : null;
+            try {
+              Vibration.vibrate(Platform.OS === 'android' ? [0, 400, 200, 400] : 400);
+            } catch { /* vibration unavailable on some devices */ }
 
-          setOffer({
-            id: offerData.id,
-            trip_id: offerData.trip_id,
-            pickup_address: trip.pickup_address || 'Pickup location',
-            dropoff_address: trip.dropoff_address || 'Dropoff location',
-            pickup_lat: trip.pickup_lat ?? 0,
-            pickup_lng: trip.pickup_lng ?? 0,
-            fare_estimate: trip.fare_amount ? `${trip.fare_amount} JD` : '~2-5 JD',
-            distance_km: distKm != null ? distKm.toFixed(1) : '—',
-          });
-          setOfferTimer(15);
-        }
+            const distKm =
+              trip.pickup_lat != null && trip.pickup_lng != null &&
+              trip.dropoff_lat != null && trip.dropoff_lng != null
+                ? haversineKm(trip.pickup_lat, trip.pickup_lng, trip.dropoff_lat, trip.dropoff_lng)
+                : null;
+
+            setOffer({
+              id:               offerData.id,
+              trip_id:          offerData.trip_id,
+              pickup_address:   trip.pickup_address  || 'Pickup location',
+              dropoff_address:  trip.dropoff_address || 'Dropoff location',
+              pickup_lat:       trip.pickup_lat  ?? 0,
+              pickup_lng:       trip.pickup_lng  ?? 0,
+              fare_estimate:    trip.fare_amount ? `${trip.fare_amount} JD` : '~2-5 JD',
+              distance_km:      distKm != null ? distKm.toFixed(1) : '—',
+            });
+            setOfferTimer(15);
+          } catch (err) {
+            console.error('[offers] realtime handler error:', err);
+          }
+        })();
       })
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
   }, [user]);
 
-  // Offer countdown timer
+  // ── Offer countdown timer ─────────────────────────────────────────────────
   useEffect(() => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     if (!offer) return;
 
     timerRef.current = setInterval(() => {
@@ -313,151 +334,93 @@ export default function DashboardScreen() {
         if (prev <= 1) {
           clearInterval(timerRef.current!);
           timerRef.current = null;
-          setOffer(null);
+          // Use setTimeout to avoid calling setState inside a setState updater
+          setTimeout(() => { if (isMounted.current) setOffer(null); }, 0);
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
 
-    return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-    };
+    return () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
   }, [offer]);
 
+  // ── Actions ───────────────────────────────────────────────────────────────
   async function toggleOnline(value: boolean) {
-    const prevOnline = isOnline;
-    setIsOnline(value); // optimistic update
+    const prev = isOnline;
+    setIsOnline(value);
     try {
-      const session = await supabase.auth.getSession();
-      const token = session.data.session?.access_token;
+      const token = await getToken();
+      if (!token) { setIsOnline(prev); return; }
       const res = await fetch(`${API_URL}/api/drivers/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ is_online: value, is_available: value }),
       });
-      if (!res.ok) { setIsOnline(prevOnline); return; }
-
-      // Send an immediate location ping when going online so the dispatch engine
-      // can find this driver right away (the background interval fires after 10 s).
-      if (value) {
-        try {
-          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
-          setLocation(coords);
-          if (token) {
-            await fetch(`${API_URL}/api/drivers/location`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-              body: JSON.stringify({ lat: coords.latitude, lng: coords.longitude }),
-            });
-          }
-        } catch {
-          // Non-fatal — the 10s interval will pick it up shortly
-        }
-      }
+      if (!res.ok) { if (isMounted.current) setIsOnline(prev); }
     } catch {
-      setIsOnline(prevOnline); // revert on network error
+      if (isMounted.current) setIsOnline(prev);
     }
   }
 
   async function handleAccept() {
     if (!offer) return;
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    const acceptedOffer = offer;
+    setOffer(null);
     try {
-      const session = await supabase.auth.getSession();
-      const token = session.data.session?.access_token;
+      const token = await getToken();
       if (!token) throw new Error('No session');
-
-      const res = await fetch(`${API_URL}/api/trips/${offer.trip_id}/accept`, {
+      const res = await fetch(`${API_URL}/api/trips/${acceptedOffer.trip_id}/accept`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}` },
       });
-
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `HTTP ${res.status}`);
       }
-
-      setCurrentTrip({ id: offer.trip_id, status: 'accepted' as TripStatus });
-      setOffer(null);
-    } catch (err: unknown) {
-      // Do not surface raw API error messages to the user.
-      Alert.alert('Could not accept trip', 'Please try again.');
-      setOffer(null);
+      if (isMounted.current) {
+        setCurrentTrip({ id: acceptedOffer.trip_id, status: 'accepted' });
+      }
+    } catch {
+      Alert.alert('Could not accept trip', 'The offer may have expired. Please try again.');
     }
   }
 
   async function handleDecline() {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     const declinedOffer = offer;
     setOffer(null);
-    if (declinedOffer) {
-      try {
-        const session = await supabase.auth.getSession();
-        const token = session.data.session?.access_token;
-        if (token) {
-          await fetch(`${API_URL}/api/trips/${declinedOffer.trip_id}/decline`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` },
-          });
-        }
-      } catch {
-        // Non-fatal: offer is already cleared from UI
-      }
-    }
-  }
-
-  async function submitRating(stars: number) {
-    setShowRatingModal(false);
-    setRatingStars(0); // reset stars for next time
-    if (stars > 0 && ratingTripId) {
-      try {
-        const session = await supabase.auth.getSession();
-        const token = session.data.session?.access_token;
-        if (token) {
-          await fetch(`${API_URL}/api/trips/${ratingTripId}/rate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ rating: stars, ratee: 'rider' }),
-          });
-        }
-      } catch { /* non-fatal */ }
-    }
-    setRatingTripId(null);
+    if (!declinedOffer) return;
+    try {
+      const token = await getToken();
+      if (!token) return;
+      await fetch(`${API_URL}/api/trips/${declinedOffer.trip_id}/decline`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch { /* non-fatal */ }
   }
 
   async function advanceTripStatus(nextStatus: string) {
     if (!currentTrip) return;
-
+    // Snapshot the trip ID before any async gap
+    const tripId = currentTrip.id;
     try {
-      const session = await supabase.auth.getSession();
-      const token = session.data.session?.access_token;
+      const token = await getToken();
       if (!token) throw new Error('No session');
-
-      const res = await fetch(`${API_URL}/api/trips/${currentTrip.id}/status`, {
+      const res = await fetch(`${API_URL}/api/trips/${tripId}/status`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ status: nextStatus }),
       });
-
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `HTTP ${res.status}`);
       }
-
+      if (!isMounted.current) return;
       if (nextStatus === 'completed') {
-        setRatingTripId(currentTrip.id);
+        setRatingTripId(tripId);
         setRatingStars(0);
         setShowRatingModal(true);
         setCurrentTrip(null);
@@ -468,32 +431,37 @@ export default function DashboardScreen() {
         setRiderInfo(null);
         setTripDetails(null);
       } else {
-        setCurrentTrip({ ...currentTrip, status: nextStatus as TripStatus });
+        setCurrentTrip({ id: tripId, status: nextStatus as TripStatus });
       }
     } catch (err: unknown) {
-      // Do not surface raw API error messages to the user.
-      Alert.alert('Status update failed', 'Please try again.');
+      const msg = err instanceof Error ? err.message : 'Please try again.';
+      Alert.alert('Status update failed', msg);
     }
   }
 
-  const tripActions: Record<string, { labelKey: string; next: TripStatus }> = {
-    accepted:    { labelKey: 'startDrive',    next: 'en_route'    },
-    en_route:    { labelKey: 'iArrived',      next: 'arrived'     },
-    arrived:     { labelKey: 'startTrip',     next: 'in_progress' },
-    in_progress: { labelKey: 'completeTrip',  next: 'completed'   },
-  };
+  async function submitRating(stars: number) {
+    setShowRatingModal(false);
+    setRatingStars(0);
+    const tripId = ratingTripId;
+    setRatingTripId(null);
+    if (stars > 0 && tripId) {
+      try {
+        const token = await getToken();
+        if (!token) return;
+        await fetch(`${API_URL}/api/trips/${tripId}/rate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ rating: stars, ratee: 'rider' }),
+        });
+      } catch { /* non-fatal */ }
+    }
+  }
 
-  const tripStatusLabel: Record<string, string> = {
-    accepted:    t('driverAccepted'),
-    en_route:    t('drivingToPickup'),
-    arrived:     t('driverArrived'),
-    in_progress: t('tripInProgress'),
-    completed:   t('tripComplete'),
-  };
-
-  const tierBadge = getTierBadge(subscriptionTier);
+  // ── Derived ───────────────────────────────────────────────────────────────
+  const tierBadge = TIER_META[subscriptionTier] ?? TIER_META[1];
   const isTimerUrgent = offerTimer <= 5;
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
       <MapView
@@ -505,52 +473,35 @@ export default function DashboardScreen() {
       >
         {location && (
           <Marker coordinate={location}>
-            <View style={styles.driverMarker}>
-              <View style={styles.driverMarkerDot} />
-            </View>
+            <View style={styles.driverMarker}><View style={styles.driverMarkerDot} /></View>
           </Marker>
         )}
-        {/* Pickup pin — visible whenever a trip is active */}
-        {tripDetails?.pickup_lat != null && tripDetails?.pickup_lng != null && (
+        {tripDetails?.pickup_lat != null && (
           <Marker
             coordinate={{ latitude: tripDetails.pickup_lat, longitude: tripDetails.pickup_lng }}
-            title="Pickup"
-            pinColor="#F5A623"
+            title="Pickup" pinColor="#F5A623"
           />
         )}
-        {/* Dropoff pin — visible during in_progress */}
-        {currentTrip?.status === 'in_progress' &&
-          tripDetails?.dropoff_lat != null && tripDetails?.dropoff_lng != null && (
+        {currentTrip?.status === 'in_progress' && tripDetails?.dropoff_lat != null && (
           <Marker
             coordinate={{ latitude: tripDetails.dropoff_lat, longitude: tripDetails.dropoff_lng }}
-            title="Dropoff"
-            pinColor="#4CAF50"
+            title="Dropoff" pinColor="#4CAF50"
           />
         )}
-        {/* Dashed route line: driver → pickup while heading to pickup */}
         {location && tripDetails?.pickup_lat != null &&
           (currentTrip?.status === 'accepted' || currentTrip?.status === 'en_route') && (
           <Polyline
-            coordinates={[
-              location,
-              { latitude: tripDetails.pickup_lat, longitude: tripDetails.pickup_lng },
-            ]}
-            strokeColor="#F5A623"
-            strokeWidth={3}
-            lineDashPattern={[6, 3]}
+            coordinates={[location, { latitude: tripDetails.pickup_lat, longitude: tripDetails.pickup_lng }]}
+            strokeColor="#F5A623" strokeWidth={3} lineDashPattern={[6, 3]}
           />
         )}
-        {/* Dashed route line: pickup → dropoff during trip */}
-        {tripDetails?.pickup_lat != null && tripDetails?.dropoff_lat != null &&
-          currentTrip?.status === 'in_progress' && (
+        {currentTrip?.status === 'in_progress' && tripDetails?.pickup_lat != null && tripDetails?.dropoff_lat != null && (
           <Polyline
             coordinates={[
-              { latitude: tripDetails.pickup_lat, longitude: tripDetails.pickup_lng },
+              { latitude: tripDetails.pickup_lat,  longitude: tripDetails.pickup_lng },
               { latitude: tripDetails.dropoff_lat, longitude: tripDetails.dropoff_lng },
             ]}
-            strokeColor="#4CAF50"
-            strokeWidth={3}
-            lineDashPattern={[8, 4]}
+            strokeColor="#4CAF50" strokeWidth={3} lineDashPattern={[8, 4]}
           />
         )}
       </MapView>
@@ -558,15 +509,9 @@ export default function DashboardScreen() {
       {/* Top bar */}
       <SafeAreaView style={styles.topBar} edges={['top']}>
         <View style={styles.topBarInner}>
-          <View style={styles.topLogoRow}>
-            <Text style={styles.topLogo}>
-              وصل <Text style={styles.driverBadge}>Driver</Text>
-            </Text>
-            <View style={[styles.tierBadge, { backgroundColor: tierBadge.color }]}>
-              <Text style={[styles.tierBadgeText, { color: tierBadge.text }]}>
-                {tierBadge.label}
-              </Text>
-            </View>
+          <Text style={styles.topLogo}>وصل <Text style={styles.driverBadge}>Driver</Text></Text>
+          <View style={[styles.tierBadge, { backgroundColor: tierBadge.color }]}>
+            <Text style={[styles.tierBadgeText, { color: tierBadge.text }]}>{tierBadge.label}</Text>
           </View>
         </View>
       </SafeAreaView>
@@ -574,51 +519,65 @@ export default function DashboardScreen() {
       {/* Bottom panel */}
       <View style={styles.bottomPanel}>
         {!currentTrip ? (
+          /* ── Offline / Online idle state ── */
           <>
-            <View style={styles.onlineRow}>
-              <View>
-                <Text style={styles.onlineLabel}>{isOnline ? t('online') : t('offline')}</Text>
-                <Text style={styles.onlineSub}>{isOnline ? t('acceptingTrips') : t('goOnlineMsg')}</Text>
-              </View>
-              <Switch
-                value={isOnline}
-                onValueChange={toggleOnline}
-                trackColor={{ false: '#2A2A2A', true: '#F5A623' }}
-                thumbColor={isOnline ? '#000' : '#555'}
-              />
-            </View>
-
-            {isOnline && (
-              <View style={styles.waitingRow}>
-                <Text style={styles.waitingText}>{t('waitingForTrips')}</Text>
-                <View style={styles.fareIsYoursRow}>
-                  <Text style={styles.fareIsYoursText}>{t('fareIsYours')}</Text>
+            {!isOnline ? (
+              /* Offline — prominent Go Online CTA */
+              <View style={styles.offlineState}>
+                <View style={styles.offlineIconWrap}>
+                  <Ionicons name="car-outline" size={32} color="#333" />
                 </View>
-                <View style={styles.earningsRow}>
-                  <Text style={styles.earningsLabel}>{t('todayEarnings')}</Text>
-                  <Text style={styles.earningsValue}>0 JD</Text>
-                  <View style={styles.earningsSep} />
-                  <Text style={styles.earningsLabel}>{t('todayTrips')}</Text>
-                  <Text style={styles.earningsValue}>0</Text>
-                </View>
+                <Text style={styles.offlineTitle}>You're Offline</Text>
+                <Text style={styles.offlineSub}>Go online to start accepting trips</Text>
+                <TouchableOpacity
+                  style={styles.goOnlineBtn}
+                  onPress={() => toggleOnline(true)}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="power" size={20} color="#000" />
+                  <Text style={styles.goOnlineBtnText}>Go Online</Text>
+                </TouchableOpacity>
               </View>
+            ) : (
+              /* Online — status + go offline toggle */
+              <>
+                <View style={styles.onlineRow}>
+                  <View style={styles.onlineDot} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.onlineLabel}>Online</Text>
+                    <Text style={styles.onlineSub}>Accepting trips</Text>
+                  </View>
+                  <Switch
+                    value={isOnline}
+                    onValueChange={toggleOnline}
+                    trackColor={{ false: '#2A2A2A', true: '#F5A623' }}
+                    thumbColor="#000"
+                  />
+                </View>
+                <View style={styles.waitingRow}>
+                  <Text style={styles.waitingText}>Waiting for a trip request…</Text>
+                  <View style={styles.fareIsYoursRow}>
+                    <Ionicons name="cash-outline" size={14} color="#F5A623" />
+                    <Text style={styles.fareIsYoursText}>You keep 100% of the fare</Text>
+                  </View>
+                </View>
+              </>
             )}
           </>
         ) : (
+          /* ── Active trip panel ── */
           <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
-            {/* Status header */}
             <View style={styles.activeTripHeader}>
               <View style={[
                 styles.statusIndicator,
-                currentTrip.status === 'arrived' && { backgroundColor: '#4CAF50' },
+                currentTrip.status === 'arrived'     && { backgroundColor: '#4CAF50' },
                 currentTrip.status === 'in_progress' && { backgroundColor: '#2196F3' },
               ]} />
               <Text style={styles.tripActiveLabel}>
-                {tripStatusLabel[currentTrip.status] ?? t('tripActive')}
+                {TRIP_STATUS_LABEL[currentTrip.status] ?? 'Trip Active'}
               </Text>
             </View>
 
-            {/* Arrived banner */}
             {currentTrip.status === 'arrived' && (
               <View style={styles.arrivedBanner}>
                 <Ionicons name="checkmark-circle" size={22} color="#4CAF50" />
@@ -626,7 +585,6 @@ export default function DashboardScreen() {
               </View>
             )}
 
-            {/* Rider info card */}
             {riderInfo && (
               <View style={styles.riderInfoCard}>
                 <View style={styles.riderInfoLeft}>
@@ -638,21 +596,18 @@ export default function DashboardScreen() {
                     <Text style={styles.riderLabel}>Rider</Text>
                   </View>
                 </View>
-                <View style={styles.riderActions}>
-                  {riderInfo.phone ? (
-                    <TouchableOpacity
-                      style={styles.callBtn}
-                      onPress={() => Linking.openURL(`tel:${riderInfo.phone}`)}
-                    >
-                      <Ionicons name="call" size={15} color="#FFF" />
-                      <Text style={styles.callBtnText}>Call</Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
+                {riderInfo.phone ? (
+                  <TouchableOpacity
+                    style={styles.callBtn}
+                    onPress={() => Linking.openURL(`tel:${riderInfo.phone}`)}
+                  >
+                    <Ionicons name="call" size={15} color="#FFF" />
+                    <Text style={styles.callBtnText}>Call</Text>
+                  </TouchableOpacity>
+                ) : null}
               </View>
             )}
 
-            {/* Trip route card */}
             {tripDetails && (
               <View style={styles.tripRouteCard}>
                 <View style={styles.tripRouteRow}>
@@ -664,43 +619,35 @@ export default function DashboardScreen() {
                   <View style={[styles.routeDotSmall, { backgroundColor: '#4CAF50' }]} />
                   <Text style={styles.tripRouteText} numberOfLines={2}>{tripDetails.dropoff_address}</Text>
                 </View>
-                {tripDetails.fare_amount ? (
+                {!!tripDetails.fare_amount && (
                   <View style={styles.tripFareRow}>
                     <Text style={styles.tripFareLabel}>Fare</Text>
                     <Text style={styles.tripFareValue}>{tripDetails.fare_amount}</Text>
                   </View>
-                ) : null}
+                )}
               </View>
             )}
 
-            {/* Primary action button */}
-            {tripActions[currentTrip.status] && (
-              <TouchableOpacity
-                style={styles.tripActionButton}
-                onPress={() => advanceTripStatus(tripActions[currentTrip.status].next)}
-              >
-                <Text style={styles.tripActionText}>{t(tripActions[currentTrip.status].labelKey)}</Text>
-              </TouchableOpacity>
-            )}
+            {(() => {
+              const action = TRIP_ACTIONS[currentTrip.status];
+              if (!action) return null;
+              return (
+                <TouchableOpacity
+                  style={styles.tripActionButton}
+                  onPress={() => advanceTripStatus(action.next)}
+                >
+                  <Text style={styles.tripActionText}>{action.label}</Text>
+                </TouchableOpacity>
+              );
+            })()}
 
-            {/* Cancel — only before trip has started */}
             {currentTrip.status !== 'in_progress' && (
               <TouchableOpacity
                 style={styles.cancelTripBtn}
-                onPress={() => {
-                  Alert.alert(
-                    'Cancel Trip',
-                    'Are you sure you want to cancel this trip?',
-                    [
-                      { text: 'Keep Trip', style: 'cancel' },
-                      {
-                        text: 'Cancel Trip',
-                        style: 'destructive',
-                        onPress: () => advanceTripStatus('cancelled'),
-                      },
-                    ],
-                  );
-                }}
+                onPress={() => Alert.alert('Cancel Trip', 'Are you sure?', [
+                  { text: 'Keep Trip', style: 'cancel' },
+                  { text: 'Cancel Trip', style: 'destructive', onPress: () => advanceTripStatus('cancelled') },
+                ])}
               >
                 <Text style={styles.cancelTripBtnText}>Cancel Trip</Text>
               </TouchableOpacity>
@@ -709,7 +656,7 @@ export default function DashboardScreen() {
         )}
       </View>
 
-      {/* ── RIDER RATING MODAL ───────────────────────────────────── */}
+      {/* Rating modal */}
       <Modal visible={showRatingModal} transparent animationType="fade" onRequestClose={() => submitRating(0)}>
         <View style={styles.ratingOverlay}>
           <View style={styles.ratingCard}>
@@ -729,7 +676,6 @@ export default function DashboardScreen() {
             <TouchableOpacity
               style={[styles.ratingSubmitBtn, ratingStars === 0 && styles.ratingSubmitBtnDisabled]}
               onPress={() => submitRating(ratingStars)}
-              activeOpacity={0.85}
             >
               <Text style={styles.ratingSubmitText}>{ratingStars > 0 ? 'Submit Rating' : 'Rate your rider'}</Text>
             </TouchableOpacity>
@@ -745,14 +691,12 @@ export default function DashboardScreen() {
         <View style={styles.offerOverlay}>
           <View style={styles.offerCard}>
             <View style={styles.offerTimerRow}>
-              <Text style={styles.offerTimerLabel}>{t('newTripRequest')}</Text>
-              <Animated.View
-                style={[
-                  styles.offerTimer,
-                  isTimerUrgent && styles.offerTimerUrgent,
-                  isTimerUrgent && { opacity: pulseAnim },
-                ]}
-              >
+              <Text style={styles.offerTimerLabel}>New Trip Request</Text>
+              <Animated.View style={[
+                styles.offerTimer,
+                isTimerUrgent && styles.offerTimerUrgent,
+                isTimerUrgent && { opacity: pulseAnim },
+              ]}>
                 <Text style={styles.offerTimerText}>{offerTimer}s</Text>
               </Animated.View>
             </View>
@@ -771,7 +715,7 @@ export default function DashboardScreen() {
 
             <View style={styles.offerFareRow}>
               <View>
-                <Text style={styles.offerFareLabel}>{t('estimatedFareLabel')}</Text>
+                <Text style={styles.offerFareLabel}>Estimated fare</Text>
                 {offer?.distance_km && offer.distance_km !== '—' && (
                   <Text style={styles.offerDistanceText}>{offer.distance_km} km</Text>
                 )}
@@ -781,10 +725,10 @@ export default function DashboardScreen() {
 
             <View style={styles.offerButtons}>
               <TouchableOpacity style={styles.declineButton} onPress={handleDecline}>
-                <Text style={styles.declineText}>{t('decline')}</Text>
+                <Text style={styles.declineText}>Decline</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.acceptButton} onPress={handleAccept}>
-                <Text style={styles.acceptText}>{t('accept')}</Text>
+                <Text style={styles.acceptText}>Accept</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -794,72 +738,79 @@ export default function DashboardScreen() {
   );
 }
 
+// ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0A0A0A' },
   map: { flex: 1 },
+
+  // Top bar
   topBar: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
   topBarInner: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     marginHorizontal: 20, marginTop: 8,
-    backgroundColor: 'rgba(10,10,10,0.85)',
+    backgroundColor: 'rgba(10,10,10,0.88)',
     borderRadius: 14, paddingHorizontal: 16, paddingVertical: 10,
   },
-  topLogoRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   topLogo: { fontSize: 20, fontWeight: '700', color: '#F5A623' },
   driverBadge: { fontSize: 11, color: '#888', fontWeight: '400', letterSpacing: 2 },
-  tierBadge: {
-    borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3,
-  },
+  tierBadge: { borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
   tierBadgeText: { fontSize: 11, fontWeight: '700' },
+
+  // Driver map marker
   driverMarker: {
-    width: 28, height: 28, borderRadius: 14,
-    backgroundColor: '#F5A623',
-    justifyContent: 'center', alignItems: 'center',
-    borderWidth: 2, borderColor: '#FFF',
+    width: 28, height: 28, borderRadius: 14, backgroundColor: '#F5A623',
+    justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#FFF',
   },
-  driverMarkerDot: {
-    width: 10, height: 10, borderRadius: 5, backgroundColor: '#000',
-  },
+  driverMarkerDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#000' },
+
+  // Bottom panel — fills to screen edge so map never shows through
   bottomPanel: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     backgroundColor: '#111',
     borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    padding: 24,
+    paddingHorizontal: 24,
+    paddingTop: 20,
     paddingBottom: Platform.OS === 'ios' ? 40 : 24,
   },
-  onlineRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  onlineLabel: { fontSize: 18, fontWeight: '700', color: '#FFF', marginBottom: 4 },
-  onlineSub: { fontSize: 13, color: '#666' },
-  waitingRow: { marginTop: 16, alignItems: 'center', gap: 10 },
-  waitingText: { color: '#444', fontSize: 14 },
+
+  // Offline state
+  offlineState: { alignItems: 'center', paddingVertical: 8 },
+  offlineIconWrap: {
+    width: 64, height: 64, borderRadius: 32,
+    backgroundColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center',
+    marginBottom: 12,
+  },
+  offlineTitle: { fontSize: 20, fontWeight: '700', color: '#FFF', marginBottom: 6 },
+  offlineSub: { fontSize: 13, color: '#555', marginBottom: 20, textAlign: 'center' },
+  goOnlineBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: '#F5A623', borderRadius: 16,
+    paddingVertical: 16, paddingHorizontal: 40,
+    width: '100%', justifyContent: 'center',
+  },
+  goOnlineBtnText: { color: '#000', fontWeight: '800', fontSize: 18 },
+
+  // Online idle state
+  onlineRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
+  onlineDot: {
+    width: 10, height: 10, borderRadius: 5, backgroundColor: '#4CAF50',
+  },
+  onlineLabel: { fontSize: 17, fontWeight: '700', color: '#FFF', marginBottom: 2 },
+  onlineSub: { fontSize: 13, color: '#555' },
+  waitingRow: { gap: 10 },
+  waitingText: { color: '#444', fontSize: 13, textAlign: 'center' },
   fareIsYoursRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
     backgroundColor: 'rgba(245,166,35,0.07)',
     borderRadius: 8, borderWidth: 1, borderColor: 'rgba(245,166,35,0.2)',
-    paddingHorizontal: 14, paddingVertical: 6,
+    paddingHorizontal: 14, paddingVertical: 8,
   },
   fareIsYoursText: { color: '#F5A623', fontSize: 12, fontWeight: '600' },
-  earningsRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: '#161616', borderRadius: 8,
-    paddingHorizontal: 14, paddingVertical: 7,
-    borderWidth: 1, borderColor: '#2A2A2A',
-  },
-  earningsLabel: { fontSize: 12, color: '#555' },
-  earningsValue: { fontSize: 13, fontWeight: '700', color: '#FFF' },
-  earningsSep: { width: 1, height: 12, backgroundColor: '#2A2A2A', marginHorizontal: 4 },
+
+  // Active trip
+  activeTripHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
+  statusIndicator: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#F5A623' },
   tripActiveLabel: { fontSize: 18, fontWeight: '700', color: '#FFF', flex: 1 },
-  tripActionButton: {
-    backgroundColor: '#F5A623', borderRadius: 14,
-    paddingVertical: 16, alignItems: 'center', marginTop: 12,
-  },
-  tripActionText: { color: '#000', fontWeight: '700', fontSize: 17 },
-  // Active trip panel
-  activeTripHeader: {
-    flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12,
-  },
-  statusIndicator: {
-    width: 10, height: 10, borderRadius: 5, backgroundColor: '#F5A623',
-  },
   arrivedBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     backgroundColor: 'rgba(76,175,80,0.1)', borderRadius: 12,
@@ -876,22 +827,19 @@ const styles = StyleSheet.create({
   riderInfoLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   riderAvatar: {
     width: 38, height: 38, borderRadius: 19,
-    backgroundColor: 'rgba(245,166,35,0.12)',
-    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(245,166,35,0.12)', alignItems: 'center', justifyContent: 'center',
   },
   riderName: { fontSize: 15, fontWeight: '600', color: '#FFF' },
   riderLabel: { fontSize: 12, color: '#555', marginTop: 1 },
-  riderActions: { flexDirection: 'row', gap: 8 },
   callBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: '#1E6B3C', borderRadius: 20,
-    paddingHorizontal: 14, paddingVertical: 7,
+    backgroundColor: '#1E6B3C', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7,
   },
   callBtnText: { color: '#FFF', fontWeight: '600', fontSize: 13 },
   tripRouteCard: {
     backgroundColor: '#161616', borderRadius: 12,
     borderWidth: 1, borderColor: '#1E1E1E',
-    paddingHorizontal: 14, paddingVertical: 12, marginBottom: 2, gap: 8,
+    paddingHorizontal: 14, paddingVertical: 12, marginBottom: 4, gap: 8,
   },
   tripRouteRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   routeDotSmall: { width: 10, height: 10, borderRadius: 5, flexShrink: 0 },
@@ -899,37 +847,37 @@ const styles = StyleSheet.create({
   tripRouteSep: { height: 1, backgroundColor: '#1E1E1E', marginLeft: 20 },
   tripFareRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    marginTop: 8, paddingTop: 8,
-    borderTopWidth: 1, borderTopColor: '#1E1E1E',
+    marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#1E1E1E',
   },
   tripFareLabel: { color: '#666', fontSize: 12 },
   tripFareValue: { color: '#F5A623', fontSize: 16, fontWeight: '700' },
+  tripActionButton: {
+    backgroundColor: '#F5A623', borderRadius: 14,
+    paddingVertical: 16, alignItems: 'center', marginTop: 12,
+  },
+  tripActionText: { color: '#000', fontWeight: '700', fontSize: 17 },
   cancelTripBtn: {
     marginTop: 8, borderWidth: 1, borderColor: '#2A2A2A',
     borderRadius: 12, paddingVertical: 12, alignItems: 'center',
   },
   cancelTripBtnText: { color: '#666', fontSize: 14, fontWeight: '500' },
+
   // Offer modal
-  offerOverlay: {
-    flex: 1, justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.6)',
-  },
+  offerOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' },
   offerCard: {
-    backgroundColor: '#111',
-    borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    backgroundColor: '#111', borderTopLeftRadius: 28, borderTopRightRadius: 28,
     padding: 24, paddingBottom: Platform.OS === 'ios' ? 44 : 24,
   },
-  offerTimerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  offerTimerRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20,
+  },
   offerTimerLabel: { fontSize: 20, fontWeight: '700', color: '#FFF' },
   offerTimer: {
-    backgroundColor: '#F5A623', borderRadius: 20,
-    paddingHorizontal: 14, paddingVertical: 6,
+    backgroundColor: '#F5A623', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 6,
   },
   offerTimerUrgent: { backgroundColor: '#FF3B30' },
   offerTimerText: { color: '#000', fontWeight: '700', fontSize: 16 },
-  offerRoute: {
-    backgroundColor: '#1A1A1A', borderRadius: 14, padding: 16, marginBottom: 16,
-  },
+  offerRoute: { backgroundColor: '#1A1A1A', borderRadius: 14, padding: 16, marginBottom: 16 },
   offerRouteRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   offerRouteLine: { width: 1, height: 16, backgroundColor: '#333', marginLeft: 6, marginVertical: 4 },
   routeDot: { width: 10, height: 10, borderRadius: 5 },
@@ -946,27 +894,22 @@ const styles = StyleSheet.create({
     paddingVertical: 16, alignItems: 'center',
   },
   declineText: { color: '#666', fontWeight: '600', fontSize: 16 },
-  acceptButton: {
-    flex: 2, backgroundColor: '#F5A623', borderRadius: 14,
-    paddingVertical: 16, alignItems: 'center',
-  },
+  acceptButton: { flex: 2, backgroundColor: '#F5A623', borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
   acceptText: { color: '#000', fontWeight: '700', fontSize: 17 },
-  // Rider rating modal
+
+  // Rating modal
   ratingOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.75)',
-    justifyContent: 'center', alignItems: 'center', padding: 24,
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'center', alignItems: 'center', padding: 24,
   },
   ratingCard: {
     backgroundColor: '#111', borderRadius: 24, padding: 28,
-    width: '100%', alignItems: 'center',
-    borderWidth: 1, borderColor: '#1E1E1E',
+    width: '100%', alignItems: 'center', borderWidth: 1, borderColor: '#1E1E1E',
   },
   ratingTitle: { fontSize: 22, fontWeight: '700', color: '#FFF', marginBottom: 6 },
   ratingSubtitle: { fontSize: 13, color: '#555', marginBottom: 24, textAlign: 'center' },
   starsRow: { flexDirection: 'row', gap: 10, marginBottom: 28 },
   ratingSubmitBtn: {
-    backgroundColor: '#F5A623', borderRadius: 14,
-    paddingVertical: 15, paddingHorizontal: 40,
+    backgroundColor: '#F5A623', borderRadius: 14, paddingVertical: 15, paddingHorizontal: 40,
     width: '100%', alignItems: 'center', marginBottom: 12,
   },
   ratingSubmitBtnDisabled: { opacity: 0.4 },
