@@ -42,6 +42,7 @@ module.exports = ({ config }) => ({
         apiKey: process.env.GOOGLE_MAPS_API_KEY,
       },
     },
+    googleServicesFile: './google-services.json',
   },
   plugins: [
     'expo-router',
@@ -52,8 +53,22 @@ module.exports = ({ config }) => ({
         locationWhenInUsePermission:          'Wasel needs your location to show you nearby trips.',
       },
     ],
+    [
+      'expo-notifications',
+      {
+        icon: './assets/icon.png',
+        color: '#F5A623',
+        defaultChannel: 'wasel-trips',
+        sounds: [],
+      },
+    ],
   ],
   experiments: {
     typedRoutes: true,
+  },
+  extra: {
+    eas: {
+      projectId: 'DRIVER_EAS_PROJECT_ID',
+    },
   },
 });
