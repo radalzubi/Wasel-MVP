@@ -124,6 +124,7 @@ export default function HomeScreen() {
         );
         setFare(Math.max(1.5, 0.5 + dist * 0.35).toFixed(2));
         setTimeout(() => {
+          if (!isMounted.current) return;
           mapRef.current?.fitToCoordinates([pickupCoords, coords], {
             edgePadding: { top: 120, right: 60, bottom: 320, left: 60 },
             animated: true,
@@ -139,8 +140,12 @@ export default function HomeScreen() {
     (async () => {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
+        // requestForegroundPermissionsAsync can take seconds (first-launch dialog).
+        // Guard every setState in case the user navigated away before it resolved.
+        if (!isMounted.current) return;
         if (status !== 'granted') { defaultToAmman(); return; }
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        if (!isMounted.current) return;
         const { latitude, longitude } = loc.coords;
         if (inJordan(latitude, longitude)) {
           const coords = { latitude, longitude };
@@ -152,7 +157,7 @@ export default function HomeScreen() {
           defaultToAmman();
         }
       } catch {
-        defaultToAmman();
+        if (isMounted.current) defaultToAmman();
       }
     })();
   }, []);
@@ -180,9 +185,10 @@ export default function HomeScreen() {
   }, [user]);
 
   // ── Restore active trip on mount (handles app restarts mid-trip) ─────
-  // Only restore trips where a driver is already actively assigned.
-  // Stale "requested"/"dispatching" trips (stuck from previous sessions) are
-  // silently cancelled so the rider isn't locked into a ghost trip.
+  // The /active endpoint only returns trips in accepted/en_route/arrived/in_progress,
+  // so anything returned here has an assigned driver and is safe to restore directly.
+  // Stale requested/dispatching trips are never returned — the rider will hit a 409
+  // on their next request which shows the "Cancel & Retry" dialog.
   useEffect(() => {
     if (!user) return;
     (async () => {
@@ -196,18 +202,6 @@ export default function HomeScreen() {
         if (!res.ok) return;
         const data = await res.json();
         if (!data?.id) return;
-
-        // Live states — driver is actively assigned, safe to restore
-        const liveStatuses: TripStatus[] = ['accepted', 'en_route', 'arrived', 'in_progress'];
-        if (!liveStatuses.includes(data.status as TripStatus)) {
-          // Cancel any stale pre-dispatch trip so it doesn't block future requests
-          await fetch(`${API_URL}/api/trips/${data.id}/status`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ status: 'cancelled' }),
-          }).catch(() => {});
-          return;
-        }
 
         if (!isMounted.current) return;
         setTripId(data.id);
@@ -332,6 +326,7 @@ export default function HomeScreen() {
     if (now - lastFitRef.current < 5000) return;
     lastFitRef.current = now;
     setTimeout(() => {
+      if (!isMounted.current) return;
       mapRef.current?.fitToCoordinates([driverLocation, pickupCoords], {
         edgePadding: { top: 100, right: 60, bottom: 380, left: 60 },
         animated: true,
@@ -406,6 +401,7 @@ export default function HomeScreen() {
         );
         setFare(Math.max(1.5, 0.5 + dist * 0.35).toFixed(2));
         setTimeout(() => {
+          if (!isMounted.current) return;
           mapRef.current?.fitToCoordinates([pickupCoords, coords], {
             edgePadding: { top: 120, right: 60, bottom: 320, left: 60 },
             animated: true,
@@ -528,6 +524,10 @@ export default function HomeScreen() {
         }).catch(() => {});
         return; // resetTripState was already called by handleCancelTrip
       }
+
+      // Component may have unmounted (app backgrounded, tab switched) while the
+      // request was in-flight — bail out to prevent setState on a dead component.
+      if (!isMounted.current) return;
 
       setTripId(data.tripId);
       setTripStatus('dispatching');

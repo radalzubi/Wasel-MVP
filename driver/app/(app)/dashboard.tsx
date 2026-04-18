@@ -151,6 +151,30 @@ export default function DashboardScreen() {
     })();
   }, [user, getToken]);
 
+  // ── Restore active trip on mount (handles driver app restarts mid-trip) ──
+  // Without this, a driver who kills and relaunches the app mid-trip sees the
+  // offline screen with no active trip, leaving the rider permanently stranded.
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      try {
+        const token = await getToken();
+        if (!token) return;
+        const res = await fetch(`${API_URL}/api/trips/driver-active`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok || !isMounted.current) return;
+        const data = await res.json();
+        if (!data?.id) return;
+        // Bring driver online and restore the active trip — the existing
+        // useEffect([currentTrip?.id]) will re-fetch trip details and rider
+        // contact info, and resubscribe to Realtime updates automatically.
+        setIsOnline(true);
+        setCurrentTrip({ id: data.id, status: data.status as TripStatus });
+      } catch { /* non-fatal: don't block the dashboard */ }
+    })();
+  }, [user, getToken]);
+
   // ── Initial location on mount ─────────────────────────────────────────────
   useEffect(() => {
     (async () => {
@@ -181,7 +205,7 @@ export default function DashboardScreen() {
             setLocation(coords);
             try {
               const token = await getToken();
-              if (!token) return;
+              if (!token || !isMounted.current) return;
               await fetch(`${API_URL}/api/drivers/location`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -226,6 +250,7 @@ export default function DashboardScreen() {
             const pickupCoord = { latitude: d.pickup_lat, longitude: d.pickup_lng };
             const points = location ? [location, pickupCoord] : [pickupCoord];
             setTimeout(() => {
+              if (!isMounted.current) return;
               mapRef.current?.fitToCoordinates(points, {
                 edgePadding: { top: 100, right: 60, bottom: 320, left: 60 },
                 animated: true,
@@ -272,13 +297,17 @@ export default function DashboardScreen() {
   }, [currentTrip?.id]);
 
   // ── Realtime: incoming trip offers ───────────────────────────────────────
+  // Dependency is user?.id (UUID string) not the user object — the user object
+  // gets a new reference on every Supabase token refresh (~hourly), which would
+  // tear down and recreate the channel and silently drop offers during the gap.
   useEffect(() => {
-    if (!user) return;
+    if (!user?.id) return;
+    const userId = user.id; // stable local copy for the closure
     const channel = supabase
-      .channel(`driver-offers-${user.id}`)
+      .channel(`driver-offers-${userId}`)
       .on('postgres_changes', {
         event: 'INSERT', schema: 'public', table: 'trip_offers',
-        filter: `driver_id=eq.${user.id}`,
+        filter: `driver_id=eq.${userId}`,
       }, (payload) => {
         // Wrap the entire async handler — an unhandled rejection here crashes iOS
         (async () => {
@@ -322,7 +351,7 @@ export default function DashboardScreen() {
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [user]);
+  }, [user?.id]);
 
   // ── Offer countdown timer ─────────────────────────────────────────────────
   useEffect(() => {
@@ -351,7 +380,7 @@ export default function DashboardScreen() {
     setIsOnline(value);
     try {
       const token = await getToken();
-      if (!token) { setIsOnline(prev); return; }
+      if (!token) { if (isMounted.current) setIsOnline(prev); return; }
       const res = await fetch(`${API_URL}/api/drivers/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },

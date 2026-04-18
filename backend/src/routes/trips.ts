@@ -293,14 +293,17 @@ router.post('/:id/decline', requireAuth, requireDriver, async (req: AuthRequest,
   res.json({ ok: true });
 });
 
-// GET /api/trips/active — rider's current non-terminal trip, used to restore UI after app restart.
+// GET /api/trips/active — rider's live trip (driver already assigned), used to restore UI after
+// app restart. Only returns trips where a driver is actively involved so the client never
+// accidentally restores a stale pre-dispatch trip.
 // Must be declared BEFORE /:id so Express doesn't treat "active" as a UUID.
 router.get('/active', requireAuth, requireRider, async (req: AuthRequest, res) => {
+  const LIVE_STATUSES = ['accepted', 'en_route', 'arrived', 'in_progress'];
   const { data, error } = await supabase
     .from('trips')
     .select('id, driver_id, status, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, pickup_address, dropoff_address, fare_amount')
     .eq('rider_id', req.userId!)
-    .not('status', 'in', '("completed","cancelled")')
+    .in('status', LIVE_STATUSES)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -311,6 +314,29 @@ router.get('/active', requireAuth, requireRider, async (req: AuthRequest, res) =
   }
 
   res.json(data ?? null); // null = no active trip (not an error)
+});
+
+// GET /api/trips/driver-active — driver's current assigned trip, used to restore the driver UI
+// after an app restart mid-trip. Without this, a driver who relaunches the app mid-trip sees
+// the offline screen and cannot advance the trip — leaving the rider stranded.
+// Must be declared BEFORE /:id so Express doesn't treat "driver-active" as a UUID.
+router.get('/driver-active', requireAuth, requireDriver, async (req: AuthRequest, res) => {
+  const LIVE_STATUSES = ['accepted', 'en_route', 'arrived', 'in_progress'];
+  const { data, error } = await supabase
+    .from('trips')
+    .select('id, rider_id, status, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, pickup_address, dropoff_address, fare_amount')
+    .eq('driver_id', req.userId!)
+    .in('status', LIVE_STATUSES)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error('[trips/driver-active] DB error:', error.message);
+    return res.status(500).json({ error: 'Failed to fetch active trip' });
+  }
+
+  res.json(data ?? null); // null = no active trip
 });
 
 // GET /api/trips/:id — only rider or driver on the trip
