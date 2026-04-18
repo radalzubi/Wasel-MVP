@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   RefreshControl, ScrollView, Platform, Alert,
@@ -86,6 +86,13 @@ export default function ExploreScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Prevents setState after unmount if the user navigates away while places are loading
+  const isMounted = useRef(true);
+  useEffect(() => {
+    isMounted.current = true;
+    return () => { isMounted.current = false; };
+  }, []);
+
   async function fetchPlaces(isRefresh = false) {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
@@ -99,18 +106,23 @@ export default function ExploreScreen() {
         headers: token ? { 'Authorization': `Bearer ${token}` } : {},
       });
 
+      if (!isMounted.current) return;
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: Place[] = await res.json();
+      if (!isMounted.current) return;
       setPlaces(data);
       setCached(data);
     } catch {
+      if (!isMounted.current) return;
       setError(t('errorLoad'));
       if (cached.length > 0) {
         setPlaces(cached);
       }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (isMounted.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }
 

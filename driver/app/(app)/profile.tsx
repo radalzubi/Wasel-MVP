@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   ScrollView, Alert, ActivityIndicator, Platform,
@@ -42,6 +42,13 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Prevents setState after unmount (e.g. user navigates away before the fetch completes)
+  const isMounted = useRef(true);
+  useEffect(() => {
+    isMounted.current = true;
+    return () => { isMounted.current = false; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   async function load() {
@@ -53,12 +60,14 @@ export default function ProfileScreen() {
       const res = await fetch(`${API_URL}/api/drivers/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (!isMounted.current) return;
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setProfile(await res.json());
+      const data = await res.json();
+      if (isMounted.current) setProfile(data);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load');
+      if (isMounted.current) setError(e instanceof Error ? e.message : 'Failed to load');
     } finally {
-      setLoading(false);
+      if (isMounted.current) setLoading(false);
     }
   }
 

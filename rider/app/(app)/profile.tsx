@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   Alert, ScrollView, Platform, Linking,
@@ -94,6 +94,13 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
 
+  // Prevents setState after unmount (e.g. user navigates away before the fetch completes)
+  const isMounted = useRef(true);
+  useEffect(() => {
+    isMounted.current = true;
+    return () => { isMounted.current = false; };
+  }, []);
+
   const fallbackPhone: string =
     user?.phone ?? user?.user_metadata?.phone ?? '';
 
@@ -108,16 +115,17 @@ export default function ProfileScreen() {
         const res = await fetch(`${API_URL}/api/riders/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
+        if (!isMounted.current) return;
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data: RiderProfile = await res.json();
-        setProfile(data);
+        if (isMounted.current) setProfile(data);
       } catch {
-        setFetchError(true);
+        if (isMounted.current) setFetchError(true);
       } finally {
-        setLoading(false);
+        if (isMounted.current) setLoading(false);
       }
     })();
-  }, [user]);
+  }, [user?.id]);
 
   function handleSignOut() {
     Alert.alert(
@@ -257,14 +265,18 @@ export default function ProfileScreen() {
             icon="document-text-outline"
             label="Privacy policy"
             chevron
-            onPress={() => Alert.alert('Privacy Policy', 'https://wasel.jo/privacy')}
+            onPress={() => Linking.openURL('https://wasel.jo/privacy').catch(() =>
+              Alert.alert('Not available', 'Visit wasel.jo/privacy in your browser.')
+            )}
           />
           <View style={styles.rowDivider} />
           <SettingsRow
             icon="document-text-outline"
             label="Terms of service"
             chevron
-            onPress={() => Alert.alert('Terms of Service', 'https://wasel.jo/terms')}
+            onPress={() => Linking.openURL('https://wasel.jo/terms').catch(() =>
+              Alert.alert('Not available', 'Visit wasel.jo/terms in your browser.')
+            )}
           />
         </View>
 

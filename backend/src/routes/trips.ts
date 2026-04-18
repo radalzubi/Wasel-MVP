@@ -302,6 +302,33 @@ router.post('/:id/decline', requireAuth, requireDriver, async (req: AuthRequest,
   res.json({ ok: true });
 });
 
+// GET /api/trips/any-pending — returns the most recent non-terminal trip for the rider,
+// regardless of status (including 'requested' and 'dispatching').
+// Used by the 409 "Cancel & Retry" dialog to locate a stale trip that is blocking
+// new requests even though no driver has been assigned yet.
+// Without this, stale pre-dispatch trips cannot be found by GET /trips/active (which
+// only returns live-status trips) and the cancel-and-retry loop never terminates.
+// Must be declared BEFORE /:id so Express doesn't treat "any-pending" as a UUID.
+router.get('/any-pending', requireAuth, requireRider, async (req: AuthRequest, res) => {
+  const NON_TERMINAL = ['requested', 'dispatching', 'accepted', 'en_route', 'arrived', 'in_progress'];
+
+  const { data, error } = await supabase
+    .from('trips')
+    .select('id, status')
+    .eq('rider_id', req.userId!)
+    .in('status', NON_TERMINAL)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error('[trips/any-pending] DB error:', error.message);
+    return res.status(500).json({ error: 'Failed to fetch pending trip' });
+  }
+
+  res.json(data ?? null); // null = no pending trip
+});
+
 // GET /api/trips/active — rider's live trip (driver already assigned), used to restore UI after
 // app restart. Only returns trips where a driver is actively involved so the client never
 // accidentally restores a stale pre-dispatch trip.

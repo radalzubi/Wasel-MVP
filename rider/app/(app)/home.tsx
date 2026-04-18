@@ -67,6 +67,9 @@ export default function HomeScreen() {
   // Prevents the Realtime subscribe() catch-up fetch from overwriting state
   // that was just restored from the /active endpoint moments ago.
   const justRestoredRef = useRef(false);
+  // Tracks whether the most recent cancellation was rider-initiated so the
+  // Realtime cancelled event can distinguish "I cancelled" from "driver/dispatch cancelled".
+  const selfCancelledRef = useRef(false);
 
   // ── Location ──────────────────────────────────────────────────────────
   const [location, setLocation] = useState<LatLng | null>(null);
@@ -107,7 +110,11 @@ export default function HomeScreen() {
     destLat?: string;
     destLng?: string;
   }>();
-  const consumedExploreParams = useRef(false);
+  // Tracks the last set of explore params that were applied to detect changes.
+  // Using a composite key string rather than a boolean flag so that picking a
+  // second (different) destination from the Explore tab still triggers an update.
+  // A boolean ref would block the second pick because it's already 'true'.
+  const lastAppliedExploreRef = useRef<string | null>(null);
 
   // Cleanup: mark unmounted so in-flight async callbacks skip setState
   useEffect(() => () => { isMounted.current = false; }, []);
@@ -126,12 +133,16 @@ export default function HomeScreen() {
     }
   }, [user]);
 
-  // Apply destination forwarded from the Explore tab ("Ride here" button)
+  // Apply destination forwarded from the Explore tab ("Ride here" button).
+  // We compare against the last-applied composite key so that:
+  //  - Switching away and back to the Home tab doesn't re-apply the same destination.
+  //  - Picking a *different* place from Explore DOES apply the new destination.
   useFocusEffect(
     useCallback(() => {
-      if (consumedExploreParams.current) return;
       if (!destName || !destLat || !destLng) return;
-      consumedExploreParams.current = true;
+      const paramsKey = `${destName}|${destLat}|${destLng}`;
+      if (lastAppliedExploreRef.current === paramsKey) return;
+      lastAppliedExploreRef.current = paramsKey;
       const coords = { latitude: parseFloat(destLat as string), longitude: parseFloat(destLng as string) };
       const label = destName as string;
       setDropoff(label);
@@ -262,8 +273,17 @@ export default function HomeScreen() {
             setRatingStars(0);
             setShowRatingModal(true);
           } else if (st === 'cancelled') {
-            // Show "Trip cancelled" briefly then return to idle
-            setTimeout(() => { if (isMounted.current) resetTripState(); }, 1500);
+            // If the rider didn't self-cancel, show an informative alert so they
+            // know to request again (trip was cancelled by the driver or dispatch).
+            if (!selfCancelledRef.current) {
+              Alert.alert(
+                'Trip Cancelled',
+                'Your trip was cancelled. This can happen when no drivers are available or the driver is unable to pick you up. Please try requesting again.',
+                [{ text: 'OK' }],
+              );
+            }
+            selfCancelledRef.current = false;
+            setTimeout(() => { if (isMounted.current) resetTripState(); }, 0);
           }
         } catch (err) {
           console.error('[trip-sub] payload error:', err);
@@ -528,13 +548,17 @@ export default function HomeScreen() {
               style: 'destructive',
               onPress: async () => {
                 try {
-                  const activeRes = await fetch(`${API_URL}/api/trips/active`, {
+                  // Use /any-pending instead of /active so we can find and cancel trips
+                  // in 'requested' or 'dispatching' status (before a driver is assigned).
+                  // GET /active only returns live-status trips and would miss pre-dispatch
+                  // stale trips, causing this cancel-and-retry to loop forever.
+                  const pendingRes = await fetch(`${API_URL}/api/trips/any-pending`, {
                     headers: { Authorization: `Bearer ${token}` },
                   });
-                  if (activeRes.ok) {
-                    const active = await activeRes.json();
-                    if (active?.id) {
-                      await fetch(`${API_URL}/api/trips/${active.id}/status`, {
+                  if (pendingRes.ok) {
+                    const pending = await pendingRes.json();
+                    if (pending?.id) {
+                      await fetch(`${API_URL}/api/trips/${pending.id}/status`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                         body: JSON.stringify({ status: 'cancelled' }),
@@ -582,7 +606,8 @@ export default function HomeScreen() {
 
   // ── Cancel trip ───────────────────────────────────────────────────────
   async function handleCancelTrip() {
-    cancelledRef.current = true; // stop any in-flight request from setting trip state
+    cancelledRef.current = true;    // stop any in-flight request from setting trip state
+    selfCancelledRef.current = true; // tell the Realtime handler this was rider-initiated
     if (tripId) {
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -613,6 +638,8 @@ export default function HomeScreen() {
     setSuggestions([]);
     setSearchMode('idle');
     lastFitRef.current = 0;
+    selfCancelledRef.current = false;
+    cancelledRef.current = false;
   }
 
   async function submitRating(stars: number) {
