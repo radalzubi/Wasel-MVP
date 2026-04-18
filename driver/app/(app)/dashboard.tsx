@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
@@ -103,9 +104,20 @@ export default function DashboardScreen() {
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const pulseLoopRef = useRef<Animated.CompositeAnimation | null>(null);
 
-  // Mark unmounted so async callbacks can bail out safely
+  // Mark unmounted so async callbacks can bail out safely.
+  // Also set up the Android notification channel on first mount.
   useEffect(() => {
     isMounted.current = true;
+
+    if (Platform.OS === 'android') {
+      Notifications.setNotificationChannelAsync('wasel-trips', {
+        name: 'Wasel Trip Alerts',
+        importance: Notifications.AndroidImportance.HIGH,
+        sound: 'default',
+        vibrationPattern: [0, 250, 250, 250],
+      });
+    }
+
     return () => { isMounted.current = false; };
   }, []);
 
@@ -219,36 +231,60 @@ export default function DashboardScreen() {
 
   // ── Continuous location updates while online (watchPosition = no manual polling) ──
   useEffect(() => {
-    if (!isOnline || !user) return;
-    let sub: Location.LocationSubscription | null = null;
-    // Tracks cleanup so an already-started async callback doesn't PATCH
-    // location to the server after the driver has gone offline.
+    if (!isOnline) return;
+
+    let subscription: Location.LocationSubscription | null = null;
     let cancelled = false;
 
     (async () => {
-      try {
-        sub = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.Balanced, timeInterval: 10_000, distanceInterval: 30 },
-          async (loc) => {
-            if (!isMounted.current || cancelled) return;
-            const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
-            setLocation(coords);
-            try {
-              const token = await getToken();
-              if (!token || !isMounted.current || cancelled) return;
-              await fetch(`${API_URL}/api/drivers/location`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ lat: coords.latitude, lng: coords.longitude }),
-              });
-            } catch { /* non-fatal ping failure */ }
-          },
-        );
-      } catch { /* permission revoked while online */ }
+      // Request foreground permission first (required on iOS before background).
+      const { status: fgStatus } = await Location.requestForegroundPermissionsAsync();
+      if (fgStatus !== 'granted') {
+        console.warn('[location] foreground permission denied');
+        return;
+      }
+
+      // Request background permission ("Always Allow" on iOS, foreground service on Android).
+      await Location.requestBackgroundPermissionsAsync();
+      // Don't abort if denied — degraded foreground-only mode is still functional.
+
+      if (cancelled) return;
+
+      subscription = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.Balanced,
+          timeInterval: 10_000,
+          distanceInterval: 30,
+        },
+        async (loc) => {
+          if (cancelled) return;
+          const { latitude: lat, longitude: lng } = loc.coords;
+          setLocation({ latitude: lat, longitude: lng });
+
+          try {
+            const session = await supabase.auth.getSession();
+            const token = session.data.session?.access_token;
+            if (!token) return;
+            await fetch(`${API_URL}/api/drivers/location`, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ lat, lng }),
+            });
+          } catch (err) {
+            console.warn('[location] PATCH failed:', err);
+          }
+        },
+      );
     })();
 
-    return () => { cancelled = true; sub?.remove(); };
-  }, [isOnline, user, getToken]);
+    return () => {
+      cancelled = true;
+      subscription?.remove();
+    };
+  }, [isOnline]);
 
   // ── Fetch trip details + rider contact when trip accepted ─────────────────
   useEffect(() => {

@@ -27,6 +27,9 @@ module.exports = ({ config }) => ({
   ios: {
     bundleIdentifier: 'com.wasel.driver',
     supportsTablet:   false,
+    infoPlist: {
+      UIBackgroundModes: ['location', 'fetch'],
+    },
     config: {
       googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY,
     },
@@ -49,8 +52,14 @@ module.exports = ({ config }) => ({
     [
       'expo-location',
       {
-        locationAlwaysAndWhenInUsePermission: 'Wasel needs your location to show you nearby trips.',
-        locationWhenInUsePermission:          'Wasel needs your location to show you nearby trips.',
+        locationAlwaysAndWhenInUsePermission:
+          'Wasel needs your location in the background to show riders your position while driving.',
+        locationWhenInUsePermission:
+          'Wasel needs your location to show you nearby trips.',
+        isAndroidForegroundServiceEnabled: true,
+        isAndroidBackgroundLocationEnabled: true,
+        androidForegroundServiceNotificationTitle: 'Wasel Driver — Active',
+        androidForegroundServiceNotificationBody:  'Your location is being shared with riders.',
       },
     ],
     [
