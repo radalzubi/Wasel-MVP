@@ -19,9 +19,6 @@ router.patch('/location', requireAuth, requireDriver, async (req: AuthRequest, r
   const { error } = await supabase
     .from('drivers')
     .update({
-      current_location: `SRID=4326;POINT(${lng} ${lat})`,
-      // Plain float columns so the dispatch engine can read them without
-      // needing PostGIS-aware queries (Supabase REST returns geometry as WKB hex).
       location_lat: lat,
       location_lng: lng,
     })

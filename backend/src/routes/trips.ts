@@ -116,8 +116,6 @@ router.post('/', requireAuth, requireRider, async (req: AuthRequest, res) => {
     .from('trips')
     .insert({
       rider_id:         req.userId,
-      pickup_location:  `SRID=4326;POINT(${pickup_lng} ${pickup_lat})`,
-      dropoff_location: `SRID=4326;POINT(${dropoff_lng} ${dropoff_lat})`,
       pickup_lat,
       pickup_lng,
       dropoff_lat,
