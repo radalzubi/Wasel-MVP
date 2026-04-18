@@ -321,6 +321,62 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res) => {
   res.json(data);
 });
 
+// GET /api/trips/:id/contact — counterparty name + phone (driver gets rider info, rider gets driver info)
+// Only exposed once a driver is assigned and the trip is active. Never leaks data pre-assignment.
+router.get('/:id/contact', requireAuth, async (req: AuthRequest, res) => {
+  if (!isValidUUID(req.params.id)) return res.status(400).json({ error: 'Invalid trip ID' });
+
+  const { data: trip, error: tripErr } = await supabase
+    .from('trips')
+    .select('rider_id, driver_id, status')
+    .eq('id', req.params.id)
+    .maybeSingle();
+
+  if (tripErr) {
+    console.error('[trips/contact] DB error:', tripErr.message);
+    return res.status(500).json({ error: 'Failed to fetch trip' });
+  }
+  if (!trip) return res.status(404).json({ error: 'Trip not found' });
+
+  const isRider  = trip.rider_id  === req.userId;
+  const isDriver = trip.driver_id === req.userId;
+  if (!isRider && !isDriver) return res.status(403).json({ error: 'Not your trip' });
+
+  // Only expose contact once a driver has been assigned and the trip is underway
+  const VISIBLE_STATUSES = ['accepted', 'en_route', 'arrived', 'in_progress'];
+  if (!VISIBLE_STATUSES.includes(trip.status)) {
+    return res.status(404).json({ error: 'Contact not yet available' });
+  }
+
+  if (isRider && trip.driver_id) {
+    const { data: driver, error: dErr } = await supabase
+      .from('drivers')
+      .select('name, phone, vehicle_make, vehicle_model, vehicle_plate')
+      .eq('id', trip.driver_id)
+      .single();
+    if (dErr || !driver) return res.status(404).json({ error: 'Driver not found' });
+    return res.json({
+      role:    'driver',
+      name:    driver.name    ?? null,
+      phone:   driver.phone   ?? null,
+      vehicle: [driver.vehicle_make, driver.vehicle_model].filter(Boolean).join(' ') || null,
+      plate:   driver.vehicle_plate ?? null,
+    });
+  }
+
+  if (isDriver && trip.rider_id) {
+    const { data: rider, error: rErr } = await supabase
+      .from('riders')
+      .select('name, phone')
+      .eq('id', trip.rider_id)
+      .single();
+    if (rErr || !rider) return res.status(404).json({ error: 'Rider not found' });
+    return res.json({ role: 'rider', name: rider.name ?? null, phone: rider.phone ?? null });
+  }
+
+  return res.status(404).json({ error: 'Contact not found' });
+});
+
 // POST /api/trips/:id/rate — rider rates driver, driver rates rider
 router.post('/:id/rate', requireAuth, async (req: AuthRequest, res) => {
   if (!isValidUUID(req.params.id)) return res.status(400).json({ error: 'Invalid trip ID' });

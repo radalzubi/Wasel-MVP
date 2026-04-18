@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   ActivityIndicator, Alert, Keyboard, Platform,
-  Modal, KeyboardAvoidingView, ScrollView,
+  Modal, KeyboardAvoidingView, ScrollView, Linking,
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
@@ -79,6 +79,8 @@ export default function HomeScreen() {
   const [driverId, setDriverId] = useState<string | null>(null);
   const [driverLocation, setDriverLocation] = useState<LatLng | null>(null);
   const [driverName, setDriverName] = useState<string | null>(null);
+  const [driverPhone, setDriverPhone] = useState<string | null>(null);
+  const [driverVehicle, setDriverVehicle] = useState<string | null>(null);
   const [fare, setFare] = useState<string | null>(null);
 
   // ── Rating modal ──────────────────────────────────────────────────────
@@ -236,17 +238,20 @@ export default function HomeScreen() {
     return () => { supabase.removeChannel(ch); };
   }, [driverId, tripStatus]);
 
-  // ── Fetch driver name when driverId becomes known ─────────────────────
+  // ── Fetch driver name, phone, and vehicle when driverId becomes known ───
   useEffect(() => {
     if (!driverId) return;
     (async () => {
       try {
         const { data } = await supabase
           .from('drivers')
-          .select('name')
+          .select('name, phone, vehicle_make, vehicle_model, vehicle_plate')
           .eq('id', driverId)
           .single();
         if (data?.name) setDriverName(data.name);
+        if (data?.phone) setDriverPhone(data.phone);
+        const veh = [data?.vehicle_make, data?.vehicle_model].filter(Boolean).join(' ');
+        if (veh) setDriverVehicle(veh + (data?.vehicle_plate ? ` · ${data.vehicle_plate}` : ''));
       } catch { /* non-fatal */ }
     })();
   }, [driverId]);
@@ -439,12 +444,14 @@ export default function HomeScreen() {
     setDriverId(null);
     setDriverLocation(null);
     setDriverName(null);
+    setDriverPhone(null);
+    setDriverVehicle(null);
     setDropoff('');
     setDropoffCoords(null);
     setFare(null);
     setSuggestions([]);
     setSearchMode('idle');
-    lastFitRef.current = 0; // reset throttle so next trip auto-fits immediately
+    lastFitRef.current = 0;
   }
 
   async function submitRating(stars: number) {
@@ -645,34 +652,65 @@ export default function HomeScreen() {
             <View style={s.sheet}>
               <View style={s.sheetHandle} />
 
+              {/* Status row */}
               <View style={s.statusRow}>
                 {isSearching
                   ? <ActivityIndicator color="#F5A623" size="small" style={{ marginRight: 10 }} />
-                  : <View style={s.statusDot} />
+                  : <View style={[
+                      s.statusDot,
+                      tripStatus === 'arrived' && { backgroundColor: '#4CAF50' },
+                      tripStatus === 'in_progress' && { backgroundColor: '#2196F3' },
+                    ]} />
                 }
                 <Text style={s.statusLabel}>{statusLabel[tripStatus]}</Text>
               </View>
 
-              {/* Driver approach card — visible when driver is on the way */}
-              {driverLocation && (tripStatus === 'accepted' || tripStatus === 'en_route') && (
+              {/* ── Arrived banner ── */}
+              {tripStatus === 'arrived' && (
+                <View style={s.arrivedBanner}>
+                  <Ionicons name="checkmark-circle" size={26} color="#4CAF50" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.arrivedBannerTitle}>Your driver has arrived!</Text>
+                    <Text style={s.arrivedBannerSub}>Please head to the pickup point</Text>
+                  </View>
+                </View>
+              )}
+
+              {/* ── Driver card (all assigned states) ── */}
+              {driverId && ['accepted', 'en_route', 'arrived', 'in_progress'].includes(tripStatus) && (
                 <View style={s.driverApproachCard}>
                   <View style={s.driverApproachLeft}>
                     <View style={s.driverApproachIcon}>
                       <Ionicons name="car" size={18} color="#F5A623" />
                     </View>
-                    <View>
-                      <Text style={s.driverApproachName}>
-                        {driverName || 'Your driver'}
-                      </Text>
-                      <Text style={s.driverApproachSub}>is on the way</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.driverApproachName}>{driverName || 'Your driver'}</Text>
+                      {driverVehicle
+                        ? <Text style={s.driverApproachSub}>{driverVehicle}</Text>
+                        : <Text style={s.driverApproachSub}>
+                            {tripStatus === 'arrived' ? 'has arrived' : 'is on the way'}
+                          </Text>
+                      }
                     </View>
                   </View>
-                  {driverEtaMin != null && (
-                    <View style={s.etaBadge}>
-                      <Text style={s.etaValue}>{driverEtaMin}</Text>
-                      <Text style={s.etaUnit}>min</Text>
-                    </View>
-                  )}
+                  <View style={s.driverCardRight}>
+                    {/* ETA badge — only shown when en route */}
+                    {driverEtaMin != null && (tripStatus === 'accepted' || tripStatus === 'en_route') && (
+                      <View style={s.etaBadge}>
+                        <Text style={s.etaValue}>{driverEtaMin}</Text>
+                        <Text style={s.etaUnit}>min</Text>
+                      </View>
+                    )}
+                    {/* Call button */}
+                    {driverPhone && (
+                      <TouchableOpacity
+                        style={s.callBtn}
+                        onPress={() => Linking.openURL(`tel:${driverPhone}`)}
+                      >
+                        <Ionicons name="call" size={16} color="#FFF" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 </View>
               )}
 
@@ -1074,28 +1112,44 @@ const s = StyleSheet.create({
     borderWidth: 2, borderColor: '#FFF',
   },
 
-  // Driver approach info card
+  // Arrived banner
+  arrivedBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: 'rgba(76,175,80,0.08)',
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
+    borderWidth: 1, borderColor: 'rgba(76,175,80,0.25)',
+  },
+  arrivedBannerTitle: { fontSize: 15, fontWeight: '700', color: '#4CAF50' },
+  arrivedBannerSub: { fontSize: 12, color: '#888', marginTop: 2 },
+
+  // Driver card (unified for all active states)
   driverApproachCard: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     backgroundColor: 'rgba(245,166,35,0.07)',
     borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
     borderWidth: 1, borderColor: 'rgba(245,166,35,0.18)',
   },
-  driverApproachLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  driverApproachLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
   driverApproachIcon: {
     width: 36, height: 36, borderRadius: 18,
     backgroundColor: 'rgba(245,166,35,0.12)',
-    alignItems: 'center', justifyContent: 'center',
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
   },
   driverApproachName: { fontSize: 15, fontWeight: '600', color: '#FFF' },
   driverApproachSub: { fontSize: 12, color: '#888', marginTop: 1 },
+  driverCardRight: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 },
   etaBadge: {
     alignItems: 'center',
     backgroundColor: '#F5A623', borderRadius: 10,
-    paddingHorizontal: 12, paddingVertical: 6, minWidth: 52,
+    paddingHorizontal: 10, paddingVertical: 5, minWidth: 46,
   },
-  etaValue: { fontSize: 18, fontWeight: '800', color: '#000', lineHeight: 20 },
-  etaUnit: { fontSize: 10, fontWeight: '600', color: '#000', letterSpacing: 0.5 },
+  etaValue: { fontSize: 16, fontWeight: '800', color: '#000', lineHeight: 18 },
+  etaUnit: { fontSize: 9, fontWeight: '600', color: '#000', letterSpacing: 0.5 },
+  callBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: '#1E6B3C',
+    alignItems: 'center', justifyContent: 'center',
+  },
 
   // ── Search modal ──────────────────────────────────────────────────────
   modalContainer: { flex: 1, backgroundColor: '#0A0A0A' },

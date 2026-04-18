@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  Switch, Alert, Vibration, Platform, Modal, Animated,
+  Switch, Alert, Vibration, Platform, Modal, Animated, Linking, ScrollView,
 } from 'react-native';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -66,6 +66,20 @@ export default function DashboardScreen() {
   const [ratingStars, setRatingStars] = useState(0);
   const [ratingTripId, setRatingTripId] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Active trip details fetched after acceptance
+  interface RiderInfo { name: string; phone: string | null; }
+  interface TripDetails {
+    pickup_address: string;
+    dropoff_address: string;
+    fare_amount: string;
+    pickup_lat: number;
+    pickup_lng: number;
+    dropoff_lat: number;
+    dropoff_lng: number;
+  }
+  const [riderInfo, setRiderInfo] = useState<RiderInfo | null>(null);
+  const [tripDetails, setTripDetails] = useState<TripDetails | null>(null);
 
   // Pulsing animation for urgent timer
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -152,6 +166,61 @@ export default function DashboardScreen() {
 
     return () => clearInterval(interval);
   }, [isOnline, user]);
+
+  // Fetch trip route + rider contact whenever a trip becomes active
+  useEffect(() => {
+    if (!currentTrip) {
+      setRiderInfo(null);
+      setTripDetails(null);
+      return;
+    }
+    (async () => {
+      try {
+        const session = await supabase.auth.getSession();
+        const token = session.data.session?.access_token;
+        if (!token) return;
+
+        // Trip details (addresses + coords + fare)
+        const tripRes = await fetch(`${API_URL}/api/trips/${currentTrip.id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (tripRes.ok) {
+          const d = await tripRes.json();
+          setTripDetails({
+            pickup_address:  d.pickup_address  ?? 'Pickup location',
+            dropoff_address: d.dropoff_address ?? 'Dropoff location',
+            fare_amount:     d.fare_amount != null ? `${d.fare_amount} JD` : '',
+            pickup_lat:      d.pickup_lat,
+            pickup_lng:      d.pickup_lng,
+            dropoff_lat:     d.dropoff_lat,
+            dropoff_lng:     d.dropoff_lng,
+          });
+          // Pan map to include driver + pickup
+          if (d.pickup_lat != null && d.pickup_lng != null) {
+            const pickupCoord = { latitude: d.pickup_lat, longitude: d.pickup_lng };
+            const coords = location ? [location, pickupCoord] : [pickupCoord];
+            setTimeout(() => {
+              mapRef.current?.fitToCoordinates(coords, {
+                edgePadding: { top: 100, right: 60, bottom: 320, left: 60 },
+                animated: true,
+              });
+            }, 300);
+          }
+        }
+
+        // Rider contact (only available once trip is accepted)
+        const contactRes = await fetch(`${API_URL}/api/trips/${currentTrip.id}/contact`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (contactRes.ok) {
+          const c = await contactRes.json();
+          if (c.role === 'rider') {
+            setRiderInfo({ name: c.name ?? 'Rider', phone: c.phone ?? null });
+          }
+        }
+      } catch { /* non-fatal */ }
+    })();
+  }, [currentTrip?.id]);
 
   // Subscribe to active trip status changes — handles rider-initiated cancellation.
   // When a rider cancels mid-trip (en_route / arrived / in_progress), the trips row
@@ -388,11 +457,16 @@ export default function DashboardScreen() {
       }
 
       if (nextStatus === 'completed') {
-        // Show rating modal before clearing trip
         setRatingTripId(currentTrip.id);
         setRatingStars(0);
         setShowRatingModal(true);
         setCurrentTrip(null);
+        setRiderInfo(null);
+        setTripDetails(null);
+      } else if (nextStatus === 'cancelled') {
+        setCurrentTrip(null);
+        setRiderInfo(null);
+        setTripDetails(null);
       } else {
         setCurrentTrip({ ...currentTrip, status: nextStatus as TripStatus });
       }
@@ -435,6 +509,49 @@ export default function DashboardScreen() {
               <View style={styles.driverMarkerDot} />
             </View>
           </Marker>
+        )}
+        {/* Pickup pin — visible whenever a trip is active */}
+        {tripDetails?.pickup_lat != null && tripDetails?.pickup_lng != null && (
+          <Marker
+            coordinate={{ latitude: tripDetails.pickup_lat, longitude: tripDetails.pickup_lng }}
+            title="Pickup"
+            pinColor="#F5A623"
+          />
+        )}
+        {/* Dropoff pin — visible during in_progress */}
+        {currentTrip?.status === 'in_progress' &&
+          tripDetails?.dropoff_lat != null && tripDetails?.dropoff_lng != null && (
+          <Marker
+            coordinate={{ latitude: tripDetails.dropoff_lat, longitude: tripDetails.dropoff_lng }}
+            title="Dropoff"
+            pinColor="#4CAF50"
+          />
+        )}
+        {/* Dashed route line: driver → pickup while heading to pickup */}
+        {location && tripDetails?.pickup_lat != null &&
+          (currentTrip?.status === 'accepted' || currentTrip?.status === 'en_route') && (
+          <Polyline
+            coordinates={[
+              location,
+              { latitude: tripDetails.pickup_lat, longitude: tripDetails.pickup_lng },
+            ]}
+            strokeColor="#F5A623"
+            strokeWidth={3}
+            lineDashPattern={[6, 3]}
+          />
+        )}
+        {/* Dashed route line: pickup → dropoff during trip */}
+        {tripDetails?.pickup_lat != null && tripDetails?.dropoff_lat != null &&
+          currentTrip?.status === 'in_progress' && (
+          <Polyline
+            coordinates={[
+              { latitude: tripDetails.pickup_lat, longitude: tripDetails.pickup_lng },
+              { latitude: tripDetails.dropoff_lat, longitude: tripDetails.dropoff_lng },
+            ]}
+            strokeColor="#4CAF50"
+            strokeWidth={3}
+            lineDashPattern={[8, 4]}
+          />
         )}
       </MapView>
 
@@ -488,11 +605,76 @@ export default function DashboardScreen() {
             )}
           </>
         ) : (
-          <View>
-            <Text style={styles.tripActiveLabel}>
-              {tripStatusLabel[currentTrip.status] ?? t('tripActive')}
-            </Text>
-            {currentTrip.status && tripActions[currentTrip.status] && (
+          <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
+            {/* Status header */}
+            <View style={styles.activeTripHeader}>
+              <View style={[
+                styles.statusIndicator,
+                currentTrip.status === 'arrived' && { backgroundColor: '#4CAF50' },
+                currentTrip.status === 'in_progress' && { backgroundColor: '#2196F3' },
+              ]} />
+              <Text style={styles.tripActiveLabel}>
+                {tripStatusLabel[currentTrip.status] ?? t('tripActive')}
+              </Text>
+            </View>
+
+            {/* Arrived banner */}
+            {currentTrip.status === 'arrived' && (
+              <View style={styles.arrivedBanner}>
+                <Ionicons name="checkmark-circle" size={22} color="#4CAF50" />
+                <Text style={styles.arrivedBannerText}>You have arrived at the pickup</Text>
+              </View>
+            )}
+
+            {/* Rider info card */}
+            {riderInfo && (
+              <View style={styles.riderInfoCard}>
+                <View style={styles.riderInfoLeft}>
+                  <View style={styles.riderAvatar}>
+                    <Ionicons name="person" size={18} color="#F5A623" />
+                  </View>
+                  <View>
+                    <Text style={styles.riderName}>{riderInfo.name}</Text>
+                    <Text style={styles.riderLabel}>Rider</Text>
+                  </View>
+                </View>
+                <View style={styles.riderActions}>
+                  {riderInfo.phone ? (
+                    <TouchableOpacity
+                      style={styles.callBtn}
+                      onPress={() => Linking.openURL(`tel:${riderInfo.phone}`)}
+                    >
+                      <Ionicons name="call" size={15} color="#FFF" />
+                      <Text style={styles.callBtnText}>Call</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              </View>
+            )}
+
+            {/* Trip route card */}
+            {tripDetails && (
+              <View style={styles.tripRouteCard}>
+                <View style={styles.tripRouteRow}>
+                  <View style={[styles.routeDotSmall, { backgroundColor: '#F5A623' }]} />
+                  <Text style={styles.tripRouteText} numberOfLines={2}>{tripDetails.pickup_address}</Text>
+                </View>
+                <View style={styles.tripRouteSep} />
+                <View style={styles.tripRouteRow}>
+                  <View style={[styles.routeDotSmall, { backgroundColor: '#4CAF50' }]} />
+                  <Text style={styles.tripRouteText} numberOfLines={2}>{tripDetails.dropoff_address}</Text>
+                </View>
+                {tripDetails.fare_amount ? (
+                  <View style={styles.tripFareRow}>
+                    <Text style={styles.tripFareLabel}>Fare</Text>
+                    <Text style={styles.tripFareValue}>{tripDetails.fare_amount}</Text>
+                  </View>
+                ) : null}
+              </View>
+            )}
+
+            {/* Primary action button */}
+            {tripActions[currentTrip.status] && (
               <TouchableOpacity
                 style={styles.tripActionButton}
                 onPress={() => advanceTripStatus(tripActions[currentTrip.status].next)}
@@ -500,7 +682,30 @@ export default function DashboardScreen() {
                 <Text style={styles.tripActionText}>{t(tripActions[currentTrip.status].labelKey)}</Text>
               </TouchableOpacity>
             )}
-          </View>
+
+            {/* Cancel — only before trip has started */}
+            {currentTrip.status !== 'in_progress' && (
+              <TouchableOpacity
+                style={styles.cancelTripBtn}
+                onPress={() => {
+                  Alert.alert(
+                    'Cancel Trip',
+                    'Are you sure you want to cancel this trip?',
+                    [
+                      { text: 'Keep Trip', style: 'cancel' },
+                      {
+                        text: 'Cancel Trip',
+                        style: 'destructive',
+                        onPress: () => advanceTripStatus('cancelled'),
+                      },
+                    ],
+                  );
+                }}
+              >
+                <Text style={styles.cancelTripBtnText}>Cancel Trip</Text>
+              </TouchableOpacity>
+            )}
+          </ScrollView>
         )}
       </View>
 
@@ -642,12 +847,68 @@ const styles = StyleSheet.create({
   earningsLabel: { fontSize: 12, color: '#555' },
   earningsValue: { fontSize: 13, fontWeight: '700', color: '#FFF' },
   earningsSep: { width: 1, height: 12, backgroundColor: '#2A2A2A', marginHorizontal: 4 },
-  tripActiveLabel: { fontSize: 18, fontWeight: '700', color: '#FFF', marginBottom: 16 },
+  tripActiveLabel: { fontSize: 18, fontWeight: '700', color: '#FFF', flex: 1 },
   tripActionButton: {
     backgroundColor: '#F5A623', borderRadius: 14,
-    paddingVertical: 16, alignItems: 'center',
+    paddingVertical: 16, alignItems: 'center', marginTop: 12,
   },
   tripActionText: { color: '#000', fontWeight: '700', fontSize: 17 },
+  // Active trip panel
+  activeTripHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12,
+  },
+  statusIndicator: {
+    width: 10, height: 10, borderRadius: 5, backgroundColor: '#F5A623',
+  },
+  arrivedBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: 'rgba(76,175,80,0.1)', borderRadius: 12,
+    borderWidth: 1, borderColor: 'rgba(76,175,80,0.25)',
+    paddingHorizontal: 14, paddingVertical: 10, marginBottom: 10,
+  },
+  arrivedBannerText: { color: '#4CAF50', fontWeight: '600', fontSize: 14, flex: 1 },
+  riderInfoCard: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: '#161616', borderRadius: 12,
+    borderWidth: 1, borderColor: '#1E1E1E',
+    paddingHorizontal: 14, paddingVertical: 12, marginBottom: 10,
+  },
+  riderInfoLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  riderAvatar: {
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: 'rgba(245,166,35,0.12)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  riderName: { fontSize: 15, fontWeight: '600', color: '#FFF' },
+  riderLabel: { fontSize: 12, color: '#555', marginTop: 1 },
+  riderActions: { flexDirection: 'row', gap: 8 },
+  callBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#1E6B3C', borderRadius: 20,
+    paddingHorizontal: 14, paddingVertical: 7,
+  },
+  callBtnText: { color: '#FFF', fontWeight: '600', fontSize: 13 },
+  tripRouteCard: {
+    backgroundColor: '#161616', borderRadius: 12,
+    borderWidth: 1, borderColor: '#1E1E1E',
+    paddingHorizontal: 14, paddingVertical: 12, marginBottom: 2, gap: 8,
+  },
+  tripRouteRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  routeDotSmall: { width: 10, height: 10, borderRadius: 5, flexShrink: 0 },
+  tripRouteText: { flex: 1, color: '#CCC', fontSize: 13 },
+  tripRouteSep: { height: 1, backgroundColor: '#1E1E1E', marginLeft: 20 },
+  tripFareRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    marginTop: 8, paddingTop: 8,
+    borderTopWidth: 1, borderTopColor: '#1E1E1E',
+  },
+  tripFareLabel: { color: '#666', fontSize: 12 },
+  tripFareValue: { color: '#F5A623', fontSize: 16, fontWeight: '700' },
+  cancelTripBtn: {
+    marginTop: 8, borderWidth: 1, borderColor: '#2A2A2A',
+    borderRadius: 12, paddingVertical: 12, alignItems: 'center',
+  },
+  cancelTripBtnText: { color: '#666', fontSize: 14, fontWeight: '500' },
   // Offer modal
   offerOverlay: {
     flex: 1, justifyContent: 'flex-end',

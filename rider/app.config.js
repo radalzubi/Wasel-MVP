@@ -63,4 +63,9 @@ module.exports = ({ config }) => ({
   experiments: {
     typedRoutes: true,
   },
+  extra: {
+    eas: {
+      projectId: '0cc4d834-9135-44ea-b41e-dd51fb20e007',
+    },
+  },
 });
