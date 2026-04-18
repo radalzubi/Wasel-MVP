@@ -377,6 +377,8 @@ export default function HomeScreen() {
       }, (payload) => {
         try {
           if (!isMounted.current) return;
+          // Bail out if the trip was reset between the CDC event arriving and now
+          if (currentTripIdRef.current === null) return;
           const lat = payload.new.location_lat as number | null;
           const lng = payload.new.location_lng as number | null;
           if (lat != null && lng != null) setDriverLocation({ latitude: lat, longitude: lng });
@@ -386,10 +388,16 @@ export default function HomeScreen() {
       })
       .subscribe(async () => {
         try {
+          // Capture before any await so we can detect a reset that happens while waiting
+          const capturedTripId = currentTripIdRef.current;
+          if (capturedTripId === null) return;
           const { data } = await supabase
             .from('drivers').select('location_lat, location_lng')
             .eq('id', driverId).single();
-          if (data?.location_lat != null && data?.location_lng != null && isMounted.current) {
+          // Verify the trip is still active after the async DB fetch resolves
+          if (currentTripIdRef.current !== capturedTripId) return;
+          if (!isMounted.current) return;
+          if (data?.location_lat != null && data?.location_lng != null) {
             setDriverLocation({ latitude: data.location_lat, longitude: data.location_lng });
           }
         } catch (err) {

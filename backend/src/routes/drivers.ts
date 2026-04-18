@@ -67,7 +67,7 @@ router.patch('/status', requireAuth, requireDriver, async (req: AuthRequest, res
 router.get('/me', requireAuth, requireDriver, async (req: AuthRequest, res) => {
   const { data, error } = await supabase
     .from('drivers')
-    .select('id, name, phone, vehicle_make, vehicle_model, vehicle_plate, subscription_tier, is_online, is_available, location_lat, location_lng, created_at')
+    .select('id, name, phone, vehicle_make, vehicle_model, vehicle_plate, subscription_tier, is_approved, is_online, is_available, location_lat, location_lng, created_at')
     .eq('id', req.userId)
     .single();
 

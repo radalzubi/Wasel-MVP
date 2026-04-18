@@ -287,6 +287,9 @@ export default function DashboardScreen() {
 
           try {
             const session = await supabase.auth.getSession();
+            // Re-check after the async getSession() call — the user may have
+            // signed out or the effect may have been cleaned up while waiting.
+            if (cancelled) return;
             const token = session.data.session?.access_token;
             if (!token) return;
             await fetch(`${API_URL}/api/drivers/location`, {
@@ -327,6 +330,7 @@ export default function DashboardScreen() {
         });
         if (tripRes.ok && isMounted.current) {
           const d = await tripRes.json();
+          if (!isMounted.current) return;
           setTripDetails({
             pickup_address:  d.pickup_address  ?? 'Pickup location',
             dropoff_address: d.dropoff_address ?? 'Dropoff location',
@@ -349,11 +353,13 @@ export default function DashboardScreen() {
           }
         }
 
+        if (!isMounted.current) return;
         const contactRes = await fetch(`${API_URL}/api/trips/${currentTrip.id}/contact`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (contactRes.ok && isMounted.current) {
           const c = await contactRes.json();
+          if (!isMounted.current) return;
           if (c.role === 'rider') {
             setRiderInfo({ name: c.name ?? 'Rider', phone: c.phone ?? null });
           }
