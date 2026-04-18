@@ -305,14 +305,8 @@ router.post('/verify', otpLimiter, async (req, res) => {
       .maybeSingle();
 
     if (!existingDriver) {
-      // Driver account exists in Auth but has no approved profile row.
-      // Return 403 WITHOUT a session — issuing a session in a rejection response
-      // would let the client silently bypass the approval gate by storing the
-      // token. The driver app must handle this status code and show a
-      // "pending approval" screen without establishing a local session.
-      return res.status(403).json({
-        error: 'Driver account pending approval. Please contact Wasel support.',
-      });
+      // Driver doesn't have a profile yet — send them to the registration screen.
+      return res.status(200).json({ status: 'pending_registration', session: data.session });
     }
 
     // Non-fatal: waitlist membership failure should not block login

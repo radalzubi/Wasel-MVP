@@ -83,16 +83,20 @@ if (WAITLIST_MODE) {
 }
 
 // Routes
-import waitlistRouter from './routes/waitlist';
-import authRouter     from './routes/auth';
-import tripsRouter    from './routes/trips';
-import driversRouter  from './routes/drivers';
-import ridersRouter   from './routes/riders';
-import exploreRouter  from './routes/explore';
+import waitlistRouter  from './routes/waitlist';
+import authRouter      from './routes/auth';
+import estimateRouter  from './routes/estimate';
+import tripsRouter     from './routes/trips';
+import driversRouter   from './routes/drivers';
+import ridersRouter    from './routes/riders';
+import exploreRouter   from './routes/explore';
 
-app.use('/api/waitlist', waitlistRouter);
-app.use('/api/auth',    authRouter);
-app.use('/api/trips',   tripsRouter);
+app.use('/api/waitlist',       waitlistRouter);
+app.use('/api/auth',           authRouter);
+// Estimate must be mounted BEFORE the trips router so Express does not
+// mistake /api/trips/estimate for a trip ID param route.
+app.use('/api/trips/estimate', estimateRouter);
+app.use('/api/trips',          tripsRouter);
 app.use('/api/drivers', driversRouter);
 app.use('/api/riders',  ridersRouter);
 app.use('/api/explore', exploreRouter);

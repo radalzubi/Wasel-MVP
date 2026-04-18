@@ -5,6 +5,8 @@ import {
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
+import { DARK_MAP_STYLE } from '../../lib/mapStyle';
+import * as Notifications from 'expo-notifications';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
@@ -13,6 +15,27 @@ import { supabase } from '../../lib/supabase';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 const AMMAN = { latitude: 31.9539, longitude: 35.9106 };
+
+function openNavigation(lat: number, lng: number) {
+  // Guard against null/0/NaN coordinates (can happen if backend omits geocoding)
+  if (!isFinite(lat) || !isFinite(lng) || (lat === 0 && lng === 0)) return;
+
+  const googleUrlIos = `comgooglemaps://?daddr=${lat},${lng}&directionsmode=driving`;
+  const googleUrlAndroid = `google.navigation:q=${lat},${lng}`;
+  const fallbackUrl = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+  const appleUrl = `maps://?daddr=${lat},${lng}`;
+
+  if (Platform.OS === 'ios') {
+    Linking.canOpenURL(googleUrlIos)
+      .then(can => Linking.openURL(can ? googleUrlIos : appleUrl))
+      .catch(() => Linking.openURL(fallbackUrl))
+      .catch(() => {});
+  } else {
+    Linking.openURL(googleUrlAndroid)
+      .catch(() => Linking.openURL(fallbackUrl))
+      .catch(() => {});
+  }
+}
 
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
@@ -84,6 +107,7 @@ export default function DashboardScreen() {
   const isMounted = useRef(true);
 
   const [isOnline, setIsOnline]               = useState(false);
+  const [isApproved, setIsApproved]           = useState<boolean>(true);
   const [location, setLocation]               = useState<LatLng | null>(null);
   const [offer, setOffer]                     = useState<TripOffer | null>(null);
   const [offerTimer, setOfferTimer]           = useState(15);
@@ -103,9 +127,20 @@ export default function DashboardScreen() {
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const pulseLoopRef = useRef<Animated.CompositeAnimation | null>(null);
 
-  // Mark unmounted so async callbacks can bail out safely
+  // Mark unmounted so async callbacks can bail out safely.
+  // Also set up the Android notification channel on first mount.
   useEffect(() => {
     isMounted.current = true;
+
+    if (Platform.OS === 'android') {
+      Notifications.setNotificationChannelAsync('wasel-trips', {
+        name: 'Wasel Trip Alerts',
+        importance: Notifications.AndroidImportance.HIGH,
+        sound: 'default',
+        vibrationPattern: [0, 250, 250, 250],
+      });
+    }
+
     return () => { isMounted.current = false; };
   }, []);
 
@@ -172,6 +207,7 @@ export default function DashboardScreen() {
         if (res.ok && isMounted.current) {
           const data = await res.json();
           setSubscriptionTier(data.subscription_tier ?? 1);
+          setIsApproved(data.is_approved ?? false);
         }
       } catch { /* non-fatal */ }
     })();
@@ -219,36 +255,60 @@ export default function DashboardScreen() {
 
   // ── Continuous location updates while online (watchPosition = no manual polling) ──
   useEffect(() => {
-    if (!isOnline || !user) return;
-    let sub: Location.LocationSubscription | null = null;
-    // Tracks cleanup so an already-started async callback doesn't PATCH
-    // location to the server after the driver has gone offline.
+    if (!isOnline) return;
+
+    let subscription: Location.LocationSubscription | null = null;
     let cancelled = false;
 
     (async () => {
-      try {
-        sub = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.Balanced, timeInterval: 10_000, distanceInterval: 30 },
-          async (loc) => {
-            if (!isMounted.current || cancelled) return;
-            const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
-            setLocation(coords);
-            try {
-              const token = await getToken();
-              if (!token || !isMounted.current || cancelled) return;
-              await fetch(`${API_URL}/api/drivers/location`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ lat: coords.latitude, lng: coords.longitude }),
-              });
-            } catch { /* non-fatal ping failure */ }
-          },
-        );
-      } catch { /* permission revoked while online */ }
+      // Request foreground permission first (required on iOS before background).
+      const { status: fgStatus } = await Location.requestForegroundPermissionsAsync();
+      if (fgStatus !== 'granted') {
+        console.warn('[location] foreground permission denied');
+        return;
+      }
+
+      // Request background permission ("Always Allow" on iOS, foreground service on Android).
+      await Location.requestBackgroundPermissionsAsync();
+      // Don't abort if denied — degraded foreground-only mode is still functional.
+
+      if (cancelled) return;
+
+      subscription = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.Balanced,
+          timeInterval: 10_000,
+          distanceInterval: 30,
+        },
+        async (loc) => {
+          if (cancelled) return;
+          const { latitude: lat, longitude: lng } = loc.coords;
+          setLocation({ latitude: lat, longitude: lng });
+
+          try {
+            const session = await supabase.auth.getSession();
+            const token = session.data.session?.access_token;
+            if (!token) return;
+            await fetch(`${API_URL}/api/drivers/location`, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ lat, lng }),
+            });
+          } catch (err) {
+            console.warn('[location] PATCH failed:', err);
+          }
+        },
+      );
     })();
 
-    return () => { cancelled = true; sub?.remove(); };
-  }, [isOnline, user, getToken]);
+    return () => {
+      cancelled = true;
+      subscription?.remove();
+    };
+  }, [isOnline]);
 
   // ── Fetch trip details + rider contact when trip accepted ─────────────────
   useEffect(() => {
@@ -537,7 +597,8 @@ export default function DashboardScreen() {
         style={styles.map}
         provider={PROVIDER_GOOGLE}
         initialRegion={{ ...AMMAN, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
-        showsUserLocation
+        showsUserLocation={false}
+        customMapStyle={DARK_MAP_STYLE}
       >
         {location && (
           <Marker coordinate={location}>
@@ -598,13 +659,16 @@ export default function DashboardScreen() {
                 <Text style={styles.offlineTitle}>You're Offline</Text>
                 <Text style={styles.offlineSub}>Go online to start accepting trips</Text>
                 <TouchableOpacity
-                  style={styles.goOnlineBtn}
-                  onPress={() => toggleOnline(true)}
-                  activeOpacity={0.85}
+                  style={[styles.goOnlineBtn, !isApproved && styles.goOnlineBtnDisabled]}
+                  onPress={() => isApproved && toggleOnline(true)}
+                  activeOpacity={isApproved ? 0.85 : 1}
                 >
                   <Ionicons name="power" size={20} color="#000" />
                   <Text style={styles.goOnlineBtnText}>Go Online</Text>
                 </TouchableOpacity>
+                {!isApproved && (
+                  <Text style={styles.pendingApprovalText}>Account pending approval</Text>
+                )}
               </View>
             ) : (
               /* Online — status + go offline toggle */
@@ -708,6 +772,20 @@ export default function DashboardScreen() {
                 </TouchableOpacity>
               );
             })()}
+
+            {currentTrip && ['accepted', 'en_route'].includes(currentTrip.status) && tripDetails && (
+              <TouchableOpacity
+                style={styles.navBtn}
+                onPress={() => openNavigation(
+                  tripDetails.pickup_lat,
+                  tripDetails.pickup_lng,
+                )}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="navigate-outline" size={18} color="#000" />
+                <Text style={styles.navBtnTxt}>Navigate</Text>
+              </TouchableOpacity>
+            )}
 
             {currentTrip.status !== 'in_progress' && (
               <TouchableOpacity
@@ -857,6 +935,8 @@ const styles = StyleSheet.create({
     width: '100%', justifyContent: 'center',
   },
   goOnlineBtnText: { color: '#000', fontWeight: '800', fontSize: 18 },
+  goOnlineBtnDisabled: { opacity: 0.4 },
+  pendingApprovalText: { color: '#F5A623', fontSize: 12, textAlign: 'center', marginTop: 8 },
 
   // Online idle state
   onlineRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
@@ -984,4 +1064,22 @@ const styles = StyleSheet.create({
   ratingSubmitText: { color: '#000', fontWeight: '700', fontSize: 16 },
   ratingSkipBtn: { paddingVertical: 8 },
   ratingSkipText: { color: '#444', fontSize: 14 },
+
+  // Navigate button
+  navBtn: {
+    backgroundColor: '#F5A623',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    marginTop: 8,
+  },
+  navBtnTxt: {
+    color: '#000',
+    fontWeight: '700',
+    fontSize: 15,
+  },
 });

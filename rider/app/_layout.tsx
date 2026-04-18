@@ -3,6 +3,20 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef } from 'react';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { LanguageProvider } from '../contexts/LanguageContext';
+import { registerPushToken } from '../lib/notifications';
+
+// Lives inside AuthProvider so it can call useAuth().
+// Registers the Expo push token once the user signs in.
+function PushRegistration() {
+  const { session } = useAuth();
+
+  useEffect(() => {
+    if (!session?.access_token) return;
+    registerPushToken(session.access_token);
+  }, [session?.access_token]);
+
+  return null;
+}
 
 // Lives inside AuthProvider so it can call useAuth().
 // Watches for sign-out and navigates to login.
@@ -48,6 +62,7 @@ export default function RootLayout() {
     <LanguageProvider>
       <AuthProvider>
         <AuthGuard />
+        <PushRegistration />
         <StatusBar style="light" />
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0A0A0A' } }}>
           <Stack.Screen name="index" />

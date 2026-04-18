@@ -27,6 +27,10 @@ module.exports = ({ config }) => ({
   ios: {
     bundleIdentifier: 'com.wasel.driver',
     supportsTablet:   false,
+    infoPlist: {
+      UIBackgroundModes: ['location', 'fetch'],
+      LSApplicationQueriesSchemes: ['comgooglemaps', 'googlemaps', 'maps'],
+    },
     config: {
       googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY,
     },
@@ -42,18 +46,39 @@ module.exports = ({ config }) => ({
         apiKey: process.env.GOOGLE_MAPS_API_KEY,
       },
     },
+    googleServicesFile: './google-services.json',
   },
   plugins: [
     'expo-router',
     [
       'expo-location',
       {
-        locationAlwaysAndWhenInUsePermission: 'Wasel needs your location to show you nearby trips.',
-        locationWhenInUsePermission:          'Wasel needs your location to show you nearby trips.',
+        locationAlwaysAndWhenInUsePermission:
+          'Wasel needs your location in the background to show riders your position while driving.',
+        locationWhenInUsePermission:
+          'Wasel needs your location to show you nearby trips.',
+        isAndroidForegroundServiceEnabled: true,
+        isAndroidBackgroundLocationEnabled: true,
+        androidForegroundServiceNotificationTitle: 'Wasel Driver — Active',
+        androidForegroundServiceNotificationBody:  'Your location is being shared with riders.',
+      },
+    ],
+    [
+      'expo-notifications',
+      {
+        icon: './assets/icon.png',
+        color: '#F5A623',
+        defaultChannel: 'wasel-trips',
+        sounds: [],
       },
     ],
   ],
   experiments: {
     typedRoutes: true,
+  },
+  extra: {
+    eas: {
+      projectId: 'DRIVER_EAS_PROJECT_ID',
+    },
   },
 });

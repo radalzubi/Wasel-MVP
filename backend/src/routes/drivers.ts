@@ -79,4 +79,99 @@ router.get('/me', requireAuth, requireDriver, async (req: AuthRequest, res) => {
   res.json(data);
 });
 
+// PATCH /api/drivers/push-token — register or refresh Expo push token
+router.patch('/push-token', requireAuth, requireDriver, async (req: AuthRequest, res) => {
+  const PushTokenSchema = z.object({
+    token: z.string().min(1),
+  });
+  const parsed = PushTokenSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const { error } = await supabase
+    .from('drivers')
+    .update({ push_token: parsed.data.token })
+    .eq('id', req.userId);
+
+  if (error) return res.status(500).json({ error: 'Failed to save push token' });
+  res.json({ ok: true });
+});
+
+const RegisterSchema = z.object({
+  name:          z.string().min(2).max(80),
+  vehicle_make:  z.string().min(1).max(40),
+  vehicle_model: z.string().min(1).max(40),
+  vehicle_plate: z.string().min(2).max(20),
+});
+
+// POST /api/drivers/register — first-time driver profile creation.
+// Called after OTP verify returns { status: 'pending_registration' }.
+// Creates profile with is_approved=false; admin must approve before going online.
+router.post('/register', requireAuth, async (req: AuthRequest, res) => {
+  // Prevent overwriting an existing approved profile.
+  const { data: existing } = await supabase
+    .from('drivers')
+    .select('id')
+    .eq('id', req.userId)
+    .maybeSingle();
+  if (existing) return res.status(409).json({ error: 'Driver profile already exists' });
+
+  const parsed = RegisterSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  // Get the phone number from the auth user record.
+  const { data: authUser } = await supabase.auth.admin.getUserById(req.userId!);
+  const phone = authUser?.user?.phone ?? '';
+
+  const { error } = await supabase.from('drivers').insert({
+    id:            req.userId,
+    phone,
+    name:          parsed.data.name,
+    vehicle_make:  parsed.data.vehicle_make,
+    vehicle_model: parsed.data.vehicle_model,
+    vehicle_plate: parsed.data.vehicle_plate.toUpperCase(),
+    is_approved:   false,
+    is_online:     false,
+    is_available:  false,
+  });
+
+  if (error) {
+    console.error('[drivers/register] insert error:', error.message);
+    return res.status(500).json({ error: 'Failed to create driver profile' });
+  }
+  res.status(201).json({ ok: true, status: 'pending_approval' });
+});
+
+// GET /api/drivers/trips — last 20 completed/cancelled trips + earnings summary
+router.get('/trips', requireAuth, requireDriver, async (req: AuthRequest, res) => {
+  const { data, error } = await supabase
+    .from('trips')
+    .select(`
+      id, status, pickup_address, dropoff_address,
+      fare_amount, created_at, completed_at, rider_rating
+    `)
+    .eq('driver_id', req.userId)
+    .in('status', ['completed', 'cancelled'])
+    .order('created_at', { ascending: false })
+    .limit(20);
+
+  if (error) return res.status(500).json({ error: 'Failed to fetch trips' });
+
+  const trips = data ?? [];
+  const completed = trips.filter(t => t.status === 'completed');
+  const totalEarnings = completed.reduce((sum, t) => sum + Number(t.fare_amount ?? 0), 0);
+  const today = new Date().toDateString();
+  const todayEarnings = completed
+    .filter(t => t.completed_at && new Date(t.completed_at).toDateString() === today)
+    .reduce((sum, t) => sum + Number(t.fare_amount ?? 0), 0);
+
+  res.json({
+    trips,
+    summary: {
+      total_trips:       completed.length,
+      total_earnings_jd: Number(totalEarnings.toFixed(2)),
+      today_earnings_jd: Number(todayEarnings.toFixed(2)),
+    },
+  });
+});
+
 export default router;

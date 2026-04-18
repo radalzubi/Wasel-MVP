@@ -1,9 +1,18 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useEffect } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { registerPushToken } from '../../lib/notifications';
 
 export default function AppLayout() {
   const { t } = useLanguage();
+  const { session } = useAuth();
+
+  useEffect(() => {
+    if (!session?.access_token) return;
+    registerPushToken(session.access_token);
+  }, [session?.access_token]);
 
   return (
     <Tabs
@@ -31,6 +40,15 @@ export default function AppLayout() {
           title: t('dashboard'),
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="car" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="earnings"
+        options={{
+          title: 'Earnings',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="wallet-outline" size={size} color={color} />
           ),
         }}
       />
