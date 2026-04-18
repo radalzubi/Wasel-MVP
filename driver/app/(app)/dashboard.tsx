@@ -16,7 +16,10 @@ import { supabase } from '../../lib/supabase';
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 const AMMAN = { latitude: 31.9539, longitude: 35.9106 };
 
-function openNavigation(lat: number, lng: number, address?: string | null) {
+function openNavigation(lat: number, lng: number) {
+  // Guard against null/0/NaN coordinates (can happen if backend omits geocoding)
+  if (!isFinite(lat) || !isFinite(lng) || (lat === 0 && lng === 0)) return;
+
   const googleUrlIos = `comgooglemaps://?daddr=${lat},${lng}&directionsmode=driving`;
   const googleUrlAndroid = `google.navigation:q=${lat},${lng}`;
   const fallbackUrl = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
@@ -25,9 +28,12 @@ function openNavigation(lat: number, lng: number, address?: string | null) {
   if (Platform.OS === 'ios') {
     Linking.canOpenURL(googleUrlIos)
       .then(can => Linking.openURL(can ? googleUrlIos : appleUrl))
-      .catch(() => Linking.openURL(fallbackUrl));
+      .catch(() => Linking.openURL(fallbackUrl))
+      .catch(() => {});
   } else {
-    Linking.openURL(googleUrlAndroid).catch(() => Linking.openURL(fallbackUrl));
+    Linking.openURL(googleUrlAndroid)
+      .catch(() => Linking.openURL(fallbackUrl))
+      .catch(() => {});
   }
 }
 
@@ -773,7 +779,6 @@ export default function DashboardScreen() {
                 onPress={() => openNavigation(
                   tripDetails.pickup_lat,
                   tripDetails.pickup_lng,
-                  tripDetails.pickup_address,
                 )}
                 activeOpacity={0.8}
               >
