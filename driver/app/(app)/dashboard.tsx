@@ -61,6 +61,9 @@ export default function DashboardScreen() {
   const [offerTimer, setOfferTimer] = useState(15);
   const [currentTrip, setCurrentTrip] = useState<{ id: string; status: TripStatus } | null>(null);
   const [subscriptionTier, setSubscriptionTier] = useState<number>(1);
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [ratingStars, setRatingStars] = useState(0);
+  const [ratingTripId, setRatingTripId] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Pulsing animation for urgent timer
@@ -344,6 +347,24 @@ export default function DashboardScreen() {
     }
   }
 
+  async function submitRating(stars: number) {
+    setShowRatingModal(false);
+    if (stars > 0 && ratingTripId) {
+      try {
+        const session = await supabase.auth.getSession();
+        const token = session.data.session?.access_token;
+        if (token) {
+          await fetch(`${API_URL}/api/trips/${ratingTripId}/rate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ rating: stars, ratee: 'rider' }),
+          });
+        }
+      } catch { /* non-fatal */ }
+    }
+    setRatingTripId(null);
+  }
+
   async function advanceTripStatus(nextStatus: string) {
     if (!currentTrip) return;
 
@@ -364,6 +385,10 @@ export default function DashboardScreen() {
       }
 
       if (nextStatus === 'completed') {
+        // Show rating modal before clearing trip
+        setRatingTripId(currentTrip.id);
+        setRatingStars(0);
+        setShowRatingModal(true);
         setCurrentTrip(null);
       } else {
         setCurrentTrip({ ...currentTrip, status: nextStatus as TripStatus });
@@ -475,6 +500,37 @@ export default function DashboardScreen() {
           </View>
         )}
       </View>
+
+      {/* ── RIDER RATING MODAL ───────────────────────────────────── */}
+      <Modal visible={showRatingModal} transparent animationType="fade">
+        <View style={styles.ratingOverlay}>
+          <View style={styles.ratingCard}>
+            <Text style={styles.ratingTitle}>How was your rider?</Text>
+            <Text style={styles.ratingSubtitle}>Your feedback helps keep the community safe</Text>
+            <View style={styles.starsRow}>
+              {[1,2,3,4,5].map((star) => (
+                <TouchableOpacity key={star} onPress={() => setRatingStars(star)} activeOpacity={0.7}>
+                  <Ionicons
+                    name={star <= ratingStars ? 'star' : 'star-outline'}
+                    size={38}
+                    color={star <= ratingStars ? '#F5A623' : '#333'}
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity
+              style={[styles.ratingSubmitBtn, ratingStars === 0 && styles.ratingSubmitBtnDisabled]}
+              onPress={() => submitRating(ratingStars)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.ratingSubmitText}>{ratingStars > 0 ? 'Submit Rating' : 'Rate your rider'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => submitRating(0)} style={styles.ratingSkipBtn}>
+              <Text style={styles.ratingSkipText}>Skip</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* Trip offer modal */}
       <Modal visible={!!offer} transparent animationType="slide">
@@ -631,4 +687,26 @@ const styles = StyleSheet.create({
     paddingVertical: 16, alignItems: 'center',
   },
   acceptText: { color: '#000', fontWeight: '700', fontSize: 17 },
+  // Rider rating modal
+  ratingOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.75)',
+    justifyContent: 'center', alignItems: 'center', padding: 24,
+  },
+  ratingCard: {
+    backgroundColor: '#111', borderRadius: 24, padding: 28,
+    width: '100%', alignItems: 'center',
+    borderWidth: 1, borderColor: '#1E1E1E',
+  },
+  ratingTitle: { fontSize: 22, fontWeight: '700', color: '#FFF', marginBottom: 6 },
+  ratingSubtitle: { fontSize: 13, color: '#555', marginBottom: 24, textAlign: 'center' },
+  starsRow: { flexDirection: 'row', gap: 10, marginBottom: 28 },
+  ratingSubmitBtn: {
+    backgroundColor: '#F5A623', borderRadius: 14,
+    paddingVertical: 15, paddingHorizontal: 40,
+    width: '100%', alignItems: 'center', marginBottom: 12,
+  },
+  ratingSubmitBtnDisabled: { opacity: 0.4 },
+  ratingSubmitText: { color: '#000', fontWeight: '700', fontSize: 16 },
+  ratingSkipBtn: { paddingVertical: 8 },
+  ratingSkipText: { color: '#444', fontSize: 14 },
 });

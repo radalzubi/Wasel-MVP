@@ -78,6 +78,11 @@ export default function HomeScreen() {
   const [driverLocation, setDriverLocation] = useState<LatLng | null>(null);
   const [fare, setFare] = useState<string | null>(null);
 
+  // ── Rating modal ──────────────────────────────────────────────────────
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [ratingStars, setRatingStars] = useState(0);
+  const [ratingTripId, setRatingTripId] = useState<string | null>(null);
+
   // ── Profile ───────────────────────────────────────────────────────────
   const [riderProfile, setRiderProfile] = useState<RiderProfile | null>(null);
 
@@ -175,7 +180,9 @@ export default function HomeScreen() {
         setTripStatus(st);
         if (did) setDriverId(did);
         if (st === 'completed') {
-          setTimeout(resetTripState, 3000);
+          setRatingTripId(tripId);
+          setRatingStars(0);
+          setShowRatingModal(true);
         } else if (st === 'cancelled') {
           // Show "Trip cancelled" briefly then return to idle
           setTimeout(resetTripState, 1500);
@@ -397,6 +404,23 @@ export default function HomeScreen() {
     setSearchMode('idle');
   }
 
+  async function submitRating(stars: number) {
+    setShowRatingModal(false);
+    if (stars > 0 && ratingTripId) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        await fetch(`${API_URL}/api/trips/${ratingTripId}/rate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ rating: stars, ratee: 'driver' }),
+        });
+      } catch { /* non-fatal */ }
+    }
+    setRatingTripId(null);
+    resetTripState();
+  }
+
   // ── Derived state ─────────────────────────────────────────────────────
   const statusLabel: Record<TripStatus, string> = {
     idle: '',
@@ -495,35 +519,41 @@ export default function HomeScreen() {
 
               {/* Route card — each row tappable to re-open search */}
               <View style={s.routeCard}>
-                <TouchableOpacity
-                  style={s.routeRow}
-                  onPress={() => openSearch('pickup')}
-                  activeOpacity={0.7}
-                >
+                {/* Left: pip dots + connector line */}
+                <View style={s.routePipCol}>
                   <View style={s.pipPickup} />
-                  <View style={s.routeTextBlock}>
-                    <Text style={s.routeRowLabel}>Pickup</Text>
-                    <Text style={s.routeRowValue} numberOfLines={1}>{pickup || 'Set pickup'}</Text>
-                  </View>
-                  <Ionicons name="pencil-outline" size={14} color="#3A3A3A" />
-                </TouchableOpacity>
-
-                <View style={s.routeCardSep}>
-                  <View style={s.routeCardLine} />
+                  <View style={s.routeConnector} />
+                  <View style={s.pipDropoff} />
                 </View>
 
-                <TouchableOpacity
-                  style={s.routeRow}
-                  onPress={() => openSearch('destination')}
-                  activeOpacity={0.7}
-                >
-                  <View style={s.pipDropoff} />
-                  <View style={s.routeTextBlock}>
-                    <Text style={s.routeRowLabel}>Dropoff</Text>
-                    <Text style={s.routeRowValue} numberOfLines={1}>{dropoff}</Text>
-                  </View>
-                  <Ionicons name="pencil-outline" size={14} color="#3A3A3A" />
-                </TouchableOpacity>
+                {/* Right: two tappable address rows */}
+                <View style={{ flex: 1 }}>
+                  <TouchableOpacity
+                    style={s.routeTextRow}
+                    onPress={() => openSearch('pickup')}
+                    activeOpacity={0.7}
+                  >
+                    <View style={s.routeTextBlock}>
+                      <Text style={s.routeRowLabel}>Pickup</Text>
+                      <Text style={s.routeRowValue} numberOfLines={1}>{pickup || 'Set pickup'}</Text>
+                    </View>
+                    <Ionicons name="pencil-outline" size={14} color="#3A3A3A" />
+                  </TouchableOpacity>
+
+                  <View style={s.routeRowDivider} />
+
+                  <TouchableOpacity
+                    style={s.routeTextRow}
+                    onPress={() => openSearch('destination')}
+                    activeOpacity={0.7}
+                  >
+                    <View style={s.routeTextBlock}>
+                      <Text style={s.routeRowLabel}>Dropoff</Text>
+                      <Text style={s.routeRowValue} numberOfLines={1}>{dropoff}</Text>
+                    </View>
+                    <Ionicons name="pencil-outline" size={14} color="#3A3A3A" />
+                  </TouchableOpacity>
+                </View>
               </View>
 
               {/* Fare */}
@@ -758,6 +788,37 @@ export default function HomeScreen() {
         </KeyboardAvoidingView>
         </View>
       </Modal>
+
+      {/* ── RATING MODAL ─────────────────────────────────────────── */}
+      <Modal visible={showRatingModal} transparent animationType="fade">
+        <View style={s.ratingOverlay}>
+          <View style={s.ratingCard}>
+            <Text style={s.ratingTitle}>How was your driver?</Text>
+            <Text style={s.ratingSubtitle}>Your feedback helps improve the experience</Text>
+            <View style={s.starsRow}>
+              {[1,2,3,4,5].map((star) => (
+                <TouchableOpacity key={star} onPress={() => setRatingStars(star)} activeOpacity={0.7}>
+                  <Ionicons
+                    name={star <= ratingStars ? 'star' : 'star-outline'}
+                    size={38}
+                    color={star <= ratingStars ? '#F5A623' : '#333'}
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity
+              style={[s.ratingSubmitBtn, ratingStars === 0 && s.ratingSubmitBtnDisabled]}
+              onPress={() => submitRating(ratingStars)}
+              activeOpacity={0.85}
+            >
+              <Text style={s.ratingSubmitText}>{ratingStars > 0 ? 'Submit Rating' : 'Rate your driver'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => submitRating(0)} style={s.ratingSkipBtn}>
+              <Text style={s.ratingSkipText}>Skip</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -829,10 +890,31 @@ const s = StyleSheet.create({
   routeCard: {
     backgroundColor: '#161616', borderRadius: 14,
     borderWidth: 1, borderColor: '#1E1E1E', overflow: 'hidden',
+    flexDirection: 'row',
   },
-  routeRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 14, paddingVertical: 13, gap: 12,
+  routePipCol: {
+    width: 44,
+    alignItems: 'center',
+    paddingVertical: 16,
+    justifyContent: 'space-between',
+  },
+  routeConnector: {
+    flex: 1,
+    width: 2,
+    backgroundColor: '#2A2A2A',
+    marginVertical: 4,
+    borderRadius: 1,
+  },
+  routeTextRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingRight: 14,
+    gap: 10,
+  },
+  routeRowDivider: {
+    height: 1,
+    backgroundColor: '#1E1E1E',
   },
   routeTextBlock: { flex: 1 },
   routeRowLabel: {
@@ -840,13 +922,6 @@ const s = StyleSheet.create({
     textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 2,
   },
   routeRowValue: { fontSize: 14, color: '#EEE', fontWeight: '500' },
-  routeCardSep: {
-    // 14px card padding + 6px = centre of the 12px pip dot
-    paddingLeft: 19,
-    height: 14,
-    justifyContent: 'center',
-  },
-  routeCardLine: { width: 2, height: '100%', backgroundColor: '#2A2A2A', borderRadius: 1 },
 
   // Pip dots
   pipPickup: {
@@ -957,4 +1032,27 @@ const s = StyleSheet.create({
   emptyState: { alignItems: 'center', paddingVertical: 48 },
   emptyStateText: { color: '#444', fontSize: 15, fontWeight: '500', marginBottom: 4 },
   emptyStateSub: { color: '#2A2A2A', fontSize: 13 },
+
+  // Rating modal
+  ratingOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.75)',
+    justifyContent: 'center', alignItems: 'center', padding: 24,
+  },
+  ratingCard: {
+    backgroundColor: '#111', borderRadius: 24, padding: 28,
+    width: '100%', alignItems: 'center',
+    borderWidth: 1, borderColor: '#1E1E1E',
+  },
+  ratingTitle: { fontSize: 22, fontWeight: '700', color: '#FFF', marginBottom: 6 },
+  ratingSubtitle: { fontSize: 13, color: '#555', marginBottom: 24, textAlign: 'center' },
+  starsRow: { flexDirection: 'row', gap: 10, marginBottom: 28 },
+  ratingSubmitBtn: {
+    backgroundColor: '#F5A623', borderRadius: 14,
+    paddingVertical: 15, paddingHorizontal: 40,
+    width: '100%', alignItems: 'center', marginBottom: 12,
+  },
+  ratingSubmitBtnDisabled: { opacity: 0.4 },
+  ratingSubmitText: { color: '#000', fontWeight: '700', fontSize: 16 },
+  ratingSkipBtn: { paddingVertical: 8 },
+  ratingSkipText: { color: '#444', fontSize: 14 },
 });

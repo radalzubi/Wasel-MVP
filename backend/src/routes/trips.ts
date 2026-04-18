@@ -303,4 +303,42 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res) => {
   res.json(data);
 });
 
+// POST /api/trips/:id/rate — rider rates driver, driver rates rider
+router.post('/:id/rate', requireAuth, async (req: AuthRequest, res) => {
+  if (!isValidUUID(req.params.id)) return res.status(400).json({ error: 'Invalid trip ID' });
+
+  const RateSchema = z.object({
+    rating: z.number().int().min(1).max(5),
+    ratee:  z.enum(['driver', 'rider']),
+  });
+  const parsed = RateSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const { data: trip } = await supabase
+    .from('trips')
+    .select('rider_id, driver_id, status')
+    .eq('id', req.params.id)
+    .maybeSingle();
+
+  if (!trip) return res.status(404).json({ error: 'Trip not found' });
+  if (trip.status !== 'completed') return res.status(409).json({ error: 'Can only rate completed trips' });
+
+  const isRider  = trip.rider_id  === req.userId;
+  const isDriver = trip.driver_id === req.userId;
+  if (!isRider && !isDriver) return res.status(403).json({ error: 'Not your trip' });
+
+  // Rider rates driver; driver rates rider
+  if (parsed.data.ratee === 'driver' && !isRider)  return res.status(403).json({ error: 'Only the rider can rate the driver' });
+  if (parsed.data.ratee === 'rider'  && !isDriver) return res.status(403).json({ error: 'Only the driver can rate the rider' });
+
+  const column = parsed.data.ratee === 'driver' ? 'driver_rating' : 'rider_rating';
+  const { error } = await supabase
+    .from('trips')
+    .update({ [column]: parsed.data.rating })
+    .eq('id', req.params.id);
+
+  if (error) return res.status(500).json({ error: 'Failed to save rating' });
+  res.json({ ok: true });
+});
+
 export default router;
