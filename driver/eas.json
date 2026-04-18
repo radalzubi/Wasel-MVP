@@ -9,7 +9,7 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://wasel-mvp-production.up.railway.app",
         "EXPO_PUBLIC_SUPABASE_URL": "https://javvotaghswskyuzrgwr.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "<SUPABASE_PUBLISHABLE_KEY>"
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "<SUPABASE_PUBLISHABLE_KEY>"
       }
     },
     "preview": {
@@ -18,7 +18,7 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://wasel-mvp-production.up.railway.app",
         "EXPO_PUBLIC_SUPABASE_URL": "https://javvotaghswskyuzrgwr.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "<SUPABASE_PUBLISHABLE_KEY>"
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "<SUPABASE_PUBLISHABLE_KEY>"
       }
     },
     "production": {
@@ -26,7 +26,7 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://wasel-mvp-production.up.railway.app",
         "EXPO_PUBLIC_SUPABASE_URL": "https://javvotaghswskyuzrgwr.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "<SUPABASE_PUBLISHABLE_KEY>"
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "<SUPABASE_PUBLISHABLE_KEY>"
       }
     }
   },
