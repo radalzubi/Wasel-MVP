@@ -107,7 +107,7 @@ export default function DashboardScreen() {
   const isMounted = useRef(true);
 
   const [isOnline, setIsOnline]               = useState(false);
-  const [isApproved, setIsApproved]           = useState<boolean>(true);
+  const [isApproved, setIsApproved]           = useState<boolean>(false);
   const [location, setLocation]               = useState<LatLng | null>(null);
   const [offer, setOffer]                     = useState<TripOffer | null>(null);
   const [offerTimer, setOfferTimer]           = useState(15);

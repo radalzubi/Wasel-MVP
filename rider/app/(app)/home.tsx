@@ -73,6 +73,10 @@ export default function HomeScreen() {
   // Tracks whether the most recent cancellation was rider-initiated so the
   // Realtime cancelled event can distinguish "I cancelled" from "driver/dispatch cancelled".
   const selfCancelledRef = useRef(false);
+  // Mirrors tripId synchronously so async Realtime callbacks can detect stale closures.
+  // Set to null immediately in resetTripState() — before any awaits resolve — so a
+  // subscribe() callback that was in-flight during a reset will see null and bail out.
+  const currentTripIdRef = useRef<string | null>(null);
 
   // ── Location ──────────────────────────────────────────────────────────
   const [location, setLocation] = useState<LatLng | null>(null);
@@ -143,6 +147,10 @@ export default function HomeScreen() {
   //  - Picking a *different* place from Explore DOES apply the new destination.
   useFocusEffect(
     useCallback(() => {
+      // Don't apply explore params while a trip is in progress — the map is
+      // already showing the active-trip panel and messing with searchMode
+      // or dropoff coords would corrupt the trip UI.
+      if (tripStatus !== 'idle') return;
       if (!destName || !destLat || !destLng) return;
       const paramsKey = `${destName}|${destLat}|${destLng}`;
       if (lastAppliedExploreRef.current === paramsKey) return;
@@ -171,7 +179,7 @@ export default function HomeScreen() {
         }, 50);
       }
       setSearchMode('confirmed');
-    }, [destName, destLat, destLng, pickupCoords]),
+    }, [destName, destLat, destLng, pickupCoords, tripStatus]),
   );
 
   // ── Get user location on mount ────────────────────────────────────────
@@ -272,6 +280,9 @@ export default function HomeScreen() {
         // race against the state we're about to set from the restore fetch.
         justRestoredRef.current = true;
         setTimeout(() => { justRestoredRef.current = false; }, 3000);
+        // Keep the stale-callback guard in sync so any subscribe() callback that
+        // fires immediately after restore sees the correct tripId.
+        currentTripIdRef.current = data.id;
         setTripId(data.id);
         setTripStatus(data.status as TripStatus);
         if (data.driver_id) setDriverId(data.driver_id);
@@ -289,6 +300,9 @@ export default function HomeScreen() {
   // ── Trip Realtime subscription ────────────────────────────────────────
   useEffect(() => {
     if (!tripId) return;
+    // Sync the ref so async callbacks spawned by this effect can detect
+    // whether the trip was reset while they were awaiting.
+    currentTripIdRef.current = tripId;
     const ch = supabase
       .channel(`trip-${tripId}`)
       .on('postgres_changes', {
@@ -327,13 +341,20 @@ export default function HomeScreen() {
           // Skip re-fetch if a restore just completed moments ago — the restore
           // already gave us fresh state and we would race against it.
           if (justRestoredRef.current) return;
+          // Capture the tripId this subscription was created for so we can detect
+          // if resetTripState() ran while we were waiting (currentTripIdRef → null).
+          const capturedTripId = tripId;
           const { data: { session } } = await supabase.auth.getSession();
           const token = session?.access_token;
           if (!token || !isMounted.current) return;
-          const res = await fetch(`${API_URL}/api/trips/${tripId}`, {
+          // If the trip was cancelled/reset while we were awaiting getSession,
+          // currentTripIdRef will be null — bail out to avoid re-activating trip UI.
+          if (currentTripIdRef.current !== capturedTripId) return;
+          const res = await fetch(`${API_URL}/api/trips/${capturedTripId}`, {
             headers: { Authorization: `Bearer ${token}` },
           });
           if (!res.ok || !isMounted.current) return;
+          if (currentTripIdRef.current !== capturedTripId) return;
           const data = await res.json();
           if (data.status && data.status !== 'requested') setTripStatus(data.status as TripStatus);
           if (data.driver_id) setDriverId(data.driver_id);
@@ -672,6 +693,13 @@ export default function HomeScreen() {
   }
 
   function resetTripState() {
+    // Clear synchronously — async Realtime callbacks check this ref after each
+    // await, so setting it to null here (before any re-render) prevents stale
+    // callbacks from calling setTripStatus after the trip has been torn down.
+    currentTripIdRef.current = null;
+    // Clear the explore-param key so the next "Ride here" pick is applied even
+    // if the user picks the same destination again after a completed trip.
+    lastAppliedExploreRef.current = null;
     setTripStatus('idle');
     setTripId(null);
     setDriverId(null);
