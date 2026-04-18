@@ -4,6 +4,7 @@ import { supabaseAdmin as supabase } from '../lib/supabase';
 import { requireAuth, requireDriver, requireRider, AuthRequest } from '../middleware/auth';
 import { dispatchTrip } from '../dispatch/engine';
 import { haversineKm } from '../dispatch/geo';
+import { sendPush } from '../lib/push';
 
 const router = Router();
 
@@ -194,7 +195,7 @@ router.post('/:id/accept', requireAuth, requireDriver, async (req: AuthRequest, 
     .update({ status: 'accepted', driver_id: req.userId })
     .eq('id', tripId)
     .eq('status', 'dispatching')
-    .select('id');
+    .select('id, rider_id');
 
   if (error) return res.status(500).json({ error: 'Failed to accept trip' });
   if (!acceptedTripRows?.length) {
@@ -208,6 +209,23 @@ router.post('/:id/accept', requireAuth, requireDriver, async (req: AuthRequest, 
     .eq('id', req.userId);
 
   recordStatusHistory(tripId, 'accepted');
+
+  // Notify rider their driver is confirmed.
+  const acceptedTrip = acceptedTripRows[0];
+  void Promise.resolve(
+    supabase
+      .from('riders')
+      .select('push_token')
+      .eq('id', acceptedTrip.rider_id)
+      .maybeSingle(),
+  ).then(({ data }) => {
+    sendPush(
+      data?.push_token,
+      '✅ Driver Confirmed',
+      'Your driver is on the way. Track them live in the app.',
+      { type: 'trip_accepted', tripId },
+    );
+  }).catch(() => {});
 
   res.json({ ok: true, status: 'accepted' });
 });
@@ -280,6 +298,24 @@ router.post('/:id/status', requireAuth, async (req: AuthRequest, res) => {
     // P5: Penalise driver only when they are the one cancelling an in-flight trip
     if (isDriver && trip.status !== 'requested' && trip.status !== 'dispatching') {
       updateDriverActivityScore(trip.driver_id, false);
+    }
+  }
+
+  // Push the counter-party on cancellation.
+  const newStatus = parsed.data.status;
+  const tripId = req.params.id;
+  if (newStatus === 'cancelled') {
+    const cancellerIsRider = req.userId === trip.rider_id;
+    if (cancellerIsRider && trip.driver_id) {
+      void Promise.resolve(
+        supabase.from('drivers').select('push_token').eq('id', trip.driver_id).maybeSingle(),
+      ).then(({ data }) => sendPush(data?.push_token, '❌ Trip Cancelled', 'The rider cancelled this trip.', { type: 'trip_cancelled', tripId }))
+        .catch(() => {});
+    } else if (!cancellerIsRider) {
+      void Promise.resolve(
+        supabase.from('riders').select('push_token').eq('id', trip.rider_id).maybeSingle(),
+      ).then(({ data }) => sendPush(data?.push_token, '❌ Trip Cancelled', "Your driver cancelled. We'll find you another one.", { type: 'trip_cancelled', tripId }))
+        .catch(() => {});
     }
   }
 

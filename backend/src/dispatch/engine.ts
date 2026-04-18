@@ -1,6 +1,7 @@
 import { supabaseAdmin as supabase } from '../lib/supabase';
 import { haversineKm } from './geo';
 import { bmpScore, DriverCandidate } from './scoring';
+import { sendPush } from '../lib/push';
 
 const OFFER_TIMEOUT_SECONDS = 15;
 const MAX_SEARCH_RADIUS_KM  = 10;
@@ -174,6 +175,24 @@ export async function dispatchTrip(
     return null;
   }
 
+  // Fire-and-forget: push the driver about the new offer.
+  void Promise.resolve(
+    supabase
+      .from('drivers')
+      .select('push_token, name')
+      .eq('id', winner.driverId)
+      .maybeSingle(),
+  ).then(({ data }) => {
+    if (data?.push_token) {
+      sendPush(
+        data.push_token,
+        '🚗 New Ride Request',
+        `Pickup nearby — accept within 15 seconds`,
+        { type: 'new_offer', tripId },
+      );
+    }
+  }).catch((err: unknown) => console.error('[dispatch] push token fetch failed:', err));
+
   // No setTimeout here — the poller owns the retry lifecycle (P6).
   return winner.driverId;
 }
@@ -309,7 +328,7 @@ export function startDispatchPoller(): ReturnType<typeof setInterval> {
         // Only continue if the trip is still waiting for a driver.
         const { data: trip } = await supabase
           .from('trips')
-          .select('status, pickup_lat, pickup_lng')
+          .select('status, pickup_lat, pickup_lng, rider_id')
           .eq('id', offer.trip_id)
           .eq('status', 'dispatching') // terminal guard
           .maybeSingle();
@@ -331,6 +350,21 @@ export function startDispatchPoller(): ReturnType<typeof setInterval> {
             console.error(`[dispatch-poller] auto-cancel failed for trip ${offer.trip_id}:`, cancelErr.message);
           } else {
             console.log(`[dispatch-poller] trip ${offer.trip_id} cancelled — exhausted ${MAX_DISPATCH_ROUNDS} rounds`);
+            // Notify rider of auto-cancellation.
+            void Promise.resolve(
+              supabase
+                .from('riders')
+                .select('push_token')
+                .eq('id', trip.rider_id)
+                .maybeSingle(),
+            ).then(({ data }) => {
+              sendPush(
+                data?.push_token,
+                '😔 No Drivers Available',
+                "We couldn't find a driver nearby. Please try again in a few minutes.",
+                { type: 'trip_auto_cancelled', tripId: offer.trip_id },
+              );
+            }).catch(() => {});
           }
           continue;
         }
