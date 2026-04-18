@@ -14,7 +14,6 @@
     },
     "preview": {
       "distribution": "internal",
-      "distribution_channel": "driver-preview",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://wasel-mvp-production.up.railway.app",
         "EXPO_PUBLIC_SUPABASE_URL": "https://javvotaghswskyuzrgwr.supabase.co",

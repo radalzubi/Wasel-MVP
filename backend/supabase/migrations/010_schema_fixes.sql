@@ -35,14 +35,33 @@ ALTER TABLE riders  ADD COLUMN IF NOT EXISTS push_token text;
 -- 5. Waitlist RLS (phone numbers are PII, currently unprotected)
 ALTER TABLE waitlist ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "waitlist_public_insert"
-  ON waitlist FOR INSERT
-  WITH CHECK (true);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename  = 'waitlist'
+      AND policyname = 'waitlist_public_insert'
+  ) THEN
+    CREATE POLICY "waitlist_public_insert"
+      ON waitlist FOR INSERT
+      WITH CHECK (true);
+  END IF;
+END$$;
 
 -- 6. Drop dead column
 ALTER TABLE drivers DROP COLUMN IF EXISTS idle_time_minutes;
 
 -- 7. Add CHECK constraint to trip_status_history
-ALTER TABLE trip_status_history
-  ADD CONSTRAINT trip_status_history_status_check
-  CHECK (status IN ('requested','dispatching','accepted','en_route','arrived','in_progress','completed','cancelled'));
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname    = 'trip_status_history_status_check'
+      AND conrelid   = 'trip_status_history'::regclass
+  ) THEN
+    ALTER TABLE trip_status_history
+      ADD CONSTRAINT trip_status_history_status_check
+      CHECK (status IN ('requested','dispatching','accepted','en_route','arrived','in_progress','completed','cancelled'));
+  END IF;
+END$$;
