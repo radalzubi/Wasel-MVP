@@ -78,7 +78,7 @@ module.exports = ({ config }) => ({
   },
   extra: {
     eas: {
-      projectId: 'DRIVER_EAS_PROJECT_ID',
+      projectId: 'd1af7738-a8f5-4d66-a345-2edab1854b25',
     },
   },
 });
