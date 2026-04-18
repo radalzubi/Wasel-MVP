@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
+import { DARK_MAP_STYLE } from '../../lib/mapStyle';
 import * as Notifications from 'expo-notifications';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -573,7 +574,8 @@ export default function DashboardScreen() {
         style={styles.map}
         provider={PROVIDER_GOOGLE}
         initialRegion={{ ...AMMAN, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
-        showsUserLocation
+        showsUserLocation={false}
+        customMapStyle={DARK_MAP_STYLE}
       >
         {location && (
           <Marker coordinate={location}>

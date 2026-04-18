@@ -6,6 +6,7 @@ import {
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
+import { DARK_MAP_STYLE } from '../../lib/mapStyle';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
@@ -708,6 +709,7 @@ export default function HomeScreen() {
         initialRegion={{ ...AMMAN, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
         showsUserLocation={showUserLocation}
         showsMyLocationButton={false}
+        customMapStyle={DARK_MAP_STYLE}
       >
         {pickupCoords && <Marker coordinate={pickupCoords} title="Pickup" pinColor="#F5A623" />}
         {dropoffCoords && <Marker coordinate={dropoffCoords} title="Dropoff" pinColor="#4CAF50" />}
