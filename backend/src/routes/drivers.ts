@@ -79,4 +79,21 @@ router.get('/me', requireAuth, requireDriver, async (req: AuthRequest, res) => {
   res.json(data);
 });
 
+// PATCH /api/drivers/push-token — register or refresh Expo push token
+router.patch('/push-token', requireAuth, requireDriver, async (req: AuthRequest, res) => {
+  const PushTokenSchema = z.object({
+    token: z.string().min(1),
+  });
+  const parsed = PushTokenSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const { error } = await supabase
+    .from('drivers')
+    .update({ push_token: parsed.data.token })
+    .eq('id', req.userId);
+
+  if (error) return res.status(500).json({ error: 'Failed to save push token' });
+  res.json({ ok: true });
+});
+
 export default router;

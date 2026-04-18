@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { supabaseAdmin as supabase } from '../lib/supabase';
 import { requireAuth, requireRider, AuthRequest } from '../middleware/auth';
 
@@ -18,6 +19,23 @@ router.get('/me', requireAuth, requireRider, async (req: AuthRequest, res) => {
   if (!data) return res.status(404).json({ error: 'Rider not found' });
 
   res.json(data);
+});
+
+// PATCH /api/riders/push-token — register or refresh Expo push token
+router.patch('/push-token', requireAuth, requireRider, async (req: AuthRequest, res) => {
+  const PushTokenSchema = z.object({
+    token: z.string().min(1),
+  });
+  const parsed = PushTokenSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const { error } = await supabase
+    .from('riders')
+    .update({ push_token: parsed.data.token })
+    .eq('id', req.userId);
+
+  if (error) return res.status(500).json({ error: 'Failed to save push token' });
+  res.json({ ok: true });
 });
 
 export default router;
