@@ -293,6 +293,26 @@ router.post('/:id/decline', requireAuth, requireDriver, async (req: AuthRequest,
   res.json({ ok: true });
 });
 
+// GET /api/trips/active — rider's current non-terminal trip, used to restore UI after app restart.
+// Must be declared BEFORE /:id so Express doesn't treat "active" as a UUID.
+router.get('/active', requireAuth, requireRider, async (req: AuthRequest, res) => {
+  const { data, error } = await supabase
+    .from('trips')
+    .select('id, driver_id, status, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, pickup_address, dropoff_address, fare_amount')
+    .eq('rider_id', req.userId!)
+    .not('status', 'in', '("completed","cancelled")')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error('[trips/active] DB error:', error.message);
+    return res.status(500).json({ error: 'Failed to fetch active trip' });
+  }
+
+  res.json(data ?? null); // null = no active trip (not an error)
+});
+
 // GET /api/trips/:id — only rider or driver on the trip
 router.get('/:id', requireAuth, async (req: AuthRequest, res) => {
   if (!isValidUUID(req.params.id)) return res.status(400).json({ error: 'Invalid trip ID' });

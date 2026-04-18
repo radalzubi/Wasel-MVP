@@ -59,6 +59,8 @@ export default function HomeScreen() {
   const pickupInputRef = useRef<TextInput>(null);
   // Throttle map viewport auto-fit to prevent excessive animations
   const lastFitRef = useRef<number>(0);
+  // Tracks whether the user cancelled while a trip request was in-flight
+  const cancelledRef = useRef(false);
 
   // ── Location ──────────────────────────────────────────────────────────
   const [location, setLocation] = useState<LatLng | null>(null);
@@ -168,6 +170,38 @@ export default function HomeScreen() {
         });
         if (res.ok) setRiderProfile(await res.json());
       } catch { /* non-fatal */ }
+    })();
+  }, [user]);
+
+  // ── Restore active trip on mount (handles app restarts mid-trip) ─────
+  // Without this, a rider who restarts the app mid-trip sees the home screen
+  // with no trip state, but their backend trip is still active — so every new
+  // "Request" gets a 409 and they can't cancel because tripId is null.
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        if (!token) return;
+        const res = await fetch(`${API_URL}/api/trips/active`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data?.id) return;
+        // Restore full trip state
+        setTripId(data.id);
+        setTripStatus(data.status as TripStatus);
+        if (data.driver_id) setDriverId(data.driver_id);
+        if (data.fare_amount != null) setFare(String(data.fare_amount));
+        if (data.pickup_address) setPickup(data.pickup_address);
+        if (data.dropoff_address) setDropoff(data.dropoff_address);
+        if (data.pickup_lat != null && data.pickup_lng != null)
+          setPickupCoords({ latitude: data.pickup_lat, longitude: data.pickup_lng });
+        if (data.dropoff_lat != null && data.dropoff_lng != null)
+          setDropoffCoords({ latitude: data.dropoff_lat, longitude: data.dropoff_lng });
+      } catch { /* non-fatal: don't block the home screen */ }
     })();
   }, [user]);
 
@@ -386,10 +420,19 @@ export default function HomeScreen() {
       Alert.alert(t('setPickupDropoff'), t('tapMapDest2'));
       return;
     }
+
+    // Token check BEFORE showing the loading state or making any request
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) {
+      Alert.alert(t('error'), 'Session expired. Please sign in again.');
+      return;
+    }
+
+    cancelledRef.current = false;
     setTripStatus('searching');
+
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
       const res = await fetch(`${API_URL}/api/trips`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -403,25 +446,71 @@ export default function HomeScreen() {
           payment_method: 'cash',
         }),
       });
-      if (!token) {
-        Alert.alert(t('error'), 'Session expired. Please restart the app.');
+
+      const data = await res.json();
+
+      // 409 = rider already has an active trip (stale from previous session or test)
+      if (res.status === 409) {
         setTripStatus('idle');
+        Alert.alert(
+          'Active Trip Found',
+          'You still have an active trip. Cancel it and request a new one?',
+          [
+            { text: 'Keep It', style: 'cancel' },
+            {
+              text: 'Cancel & Retry',
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  const activeRes = await fetch(`${API_URL}/api/trips/active`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                  });
+                  if (activeRes.ok) {
+                    const active = await activeRes.json();
+                    if (active?.id) {
+                      await fetch(`${API_URL}/api/trips/${active.id}/status`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                        body: JSON.stringify({ status: 'cancelled' }),
+                      });
+                    }
+                  }
+                } catch { /* ignore — try again anyway */ }
+                handleRequestRide();
+              },
+            },
+          ],
+        );
         return;
       }
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to request ride');
+
+      if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+
+      // User hit cancel while the request was in-flight — immediately cancel
+      if (cancelledRef.current) {
+        fetch(`${API_URL}/api/trips/${data.tripId}/status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ status: 'cancelled' }),
+        }).catch(() => {});
+        return; // resetTripState was already called by handleCancelTrip
+      }
+
       setTripId(data.tripId);
       setTripStatus('dispatching');
-      // Sync fare with the authoritative server-calculated value
       if (data.fare_amount != null) setFare(String(data.fare_amount));
-    } catch {
-      Alert.alert(t('error'), t('somethingWrong'));
-      setTripStatus('idle');
+    } catch (err: unknown) {
+      if (!cancelledRef.current) {
+        const msg = err instanceof Error ? err.message : t('somethingWrong');
+        Alert.alert(t('error'), msg);
+        setTripStatus('idle');
+      }
     }
   }
 
   // ── Cancel trip ───────────────────────────────────────────────────────
   async function handleCancelTrip() {
+    cancelledRef.current = true; // stop any in-flight request from setting trip state
     if (tripId) {
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -583,7 +672,6 @@ export default function HomeScreen() {
       {/* ── CONFIRMED: route summary + fare + request ──────────────────── */}
       {!isActiveTrip && searchMode === 'confirmed' && (
         <View style={s.sheetWrap}>
-          <SafeAreaView edges={['bottom']}>
             <View style={s.sheet}>
               <View style={s.sheetHandle} />
 
@@ -641,14 +729,12 @@ export default function HomeScreen() {
                 <Text style={s.requestBtnText}>{t('requestWasel')}</Text>
               </TouchableOpacity>
             </View>
-          </SafeAreaView>
         </View>
       )}
 
       {/* ── ACTIVE TRIP panel ─────────────────────────────────────────── */}
       {isActiveTrip && (
         <View style={s.sheetWrap}>
-          <SafeAreaView edges={['bottom']}>
             <View style={s.sheet}>
               <View style={s.sheetHandle} />
 
@@ -740,7 +826,6 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               )}
             </View>
-          </SafeAreaView>
         </View>
       )}
 
@@ -971,10 +1056,13 @@ const s = StyleSheet.create({
   earlyBadgeText: { color: '#F5A623', fontSize: 10, fontWeight: '600' },
 
   // Idle "Where to?" card
-  idleWrap: { position: 'absolute', bottom: 0, left: 0, right: 0 },
+  idleWrap: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    paddingBottom: Platform.OS === 'ios' ? 28 : 12,
+  },
   whereToCard: {
     backgroundColor: '#FFFFFF',
-    marginHorizontal: 16, marginBottom: 12,
+    marginHorizontal: 16, marginBottom: 8,
     borderRadius: 16,
     paddingHorizontal: 16, paddingVertical: 15,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -996,14 +1084,22 @@ const s = StyleSheet.create({
   pickupChipText: { fontSize: 12, color: '#555', fontWeight: '500', flex: 1 },
 
   // Bottom sheet — shared by confirm + active trip
-  sheetWrap: { position: 'absolute', bottom: 0, left: 0, right: 0 },
+  // sheetWrap fills all the way to the bottom of the screen (including the iPhone
+  // home-indicator safe area) with the same background as the sheet, so the map
+  // never bleeds through the gap below the rounded-corner sheet.
+  sheetWrap: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: '#111',
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    shadowColor: '#000', shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.4, shadowRadius: 14, elevation: 14,
+  },
   sheet: {
     backgroundColor: '#111',
     borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8,
+    paddingHorizontal: 20, paddingTop: 12,
+    paddingBottom: Platform.OS === 'ios' ? 32 : 16,
     gap: 12,
-    shadowColor: '#000', shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.4, shadowRadius: 14, elevation: 14,
   },
   sheetHandle: {
     width: 36, height: 4, backgroundColor: '#252525',
