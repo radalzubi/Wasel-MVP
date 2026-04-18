@@ -5,10 +5,12 @@ import { requireAuth, requireRider, AuthRequest } from '../middleware/auth';
 const router = Router();
 
 // GET /api/riders/me — returns the authenticated rider's profile
+// Explicit column list: excludes internal fields (waitlist_position, etc.)
+// that have no client-facing purpose.
 router.get('/me', requireAuth, requireRider, async (req: AuthRequest, res) => {
   const { data, error } = await supabase
     .from('riders')
-    .select('*')
+    .select('id, phone, name, is_waitlist_member, waitlist_joined_at, waitlist_position, created_at')
     .eq('id', req.userId!)
     .maybeSingle();
 

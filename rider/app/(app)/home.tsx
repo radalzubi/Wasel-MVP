@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   ActivityIndicator, Alert, Keyboard, Platform,
@@ -57,6 +57,8 @@ export default function HomeScreen() {
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const destInputRef = useRef<TextInput>(null);
   const pickupInputRef = useRef<TextInput>(null);
+  // Throttle map viewport auto-fit to prevent excessive animations
+  const lastFitRef = useRef<number>(0);
 
   // ── Location ──────────────────────────────────────────────────────────
   const [location, setLocation] = useState<LatLng | null>(null);
@@ -76,6 +78,7 @@ export default function HomeScreen() {
   const [tripId, setTripId] = useState<string | null>(null);
   const [driverId, setDriverId] = useState<string | null>(null);
   const [driverLocation, setDriverLocation] = useState<LatLng | null>(null);
+  const [driverName, setDriverName] = useState<string | null>(null);
   const [fare, setFare] = useState<string | null>(null);
 
   // ── Rating modal ──────────────────────────────────────────────────────
@@ -233,6 +236,37 @@ export default function HomeScreen() {
     return () => { supabase.removeChannel(ch); };
   }, [driverId, tripStatus]);
 
+  // ── Fetch driver name when driverId becomes known ─────────────────────
+  useEffect(() => {
+    if (!driverId) return;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('drivers')
+          .select('name')
+          .eq('id', driverId)
+          .single();
+        if (data?.name) setDriverName(data.name);
+      } catch { /* non-fatal */ }
+    })();
+  }, [driverId]);
+
+  // ── Auto-fit viewport to include driver + pickup when approaching ──────
+  // Throttled to once every 5 s to avoid jarring continuous animations.
+  useEffect(() => {
+    if (!driverLocation || !pickupCoords) return;
+    if (tripStatus !== 'accepted' && tripStatus !== 'en_route') return;
+    const now = Date.now();
+    if (now - lastFitRef.current < 5000) return;
+    lastFitRef.current = now;
+    setTimeout(() => {
+      mapRef.current?.fitToCoordinates([driverLocation, pickupCoords], {
+        edgePadding: { top: 100, right: 60, bottom: 380, left: 60 },
+        animated: true,
+      });
+    }, 50);
+  }, [driverLocation, pickupCoords, tripStatus]);
+
   // ── Auto-focus the right input when modal opens ───────────────────────
   useEffect(() => {
     if (searchMode !== 'open') return;
@@ -364,10 +398,17 @@ export default function HomeScreen() {
           payment_method: 'cash',
         }),
       });
+      if (!token) {
+        Alert.alert(t('error'), 'Session expired. Please restart the app.');
+        setTripStatus('idle');
+        return;
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to request ride');
       setTripId(data.tripId);
       setTripStatus('dispatching');
+      // Sync fare with the authoritative server-calculated value
+      if (data.fare_amount != null) setFare(String(data.fare_amount));
     } catch {
       Alert.alert(t('error'), t('somethingWrong'));
       setTripStatus('idle');
@@ -397,11 +438,13 @@ export default function HomeScreen() {
     setTripId(null);
     setDriverId(null);
     setDriverLocation(null);
+    setDriverName(null);
     setDropoff('');
     setDropoffCoords(null);
     setFare(null);
     setSuggestions([]);
     setSearchMode('idle');
+    lastFitRef.current = 0; // reset throttle so next trip auto-fits immediately
   }
 
   async function submitRating(stars: number) {
@@ -410,11 +453,13 @@ export default function HomeScreen() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const token = session?.access_token;
-        await fetch(`${API_URL}/api/trips/${ratingTripId}/rate`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ rating: stars, ratee: 'driver' }),
-        });
+        if (token) {
+          await fetch(`${API_URL}/api/trips/${ratingTripId}/rate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ rating: stars, ratee: 'driver' }),
+          });
+        }
       } catch { /* non-fatal */ }
     }
     setRatingTripId(null);
@@ -439,6 +484,16 @@ export default function HomeScreen() {
   const showUserLocation = location != null && inJordan(location.latitude, location.longitude);
   const activeQueryText = editingField === 'destination' ? dropoff : pickup;
 
+  // ETA from driver's current location to pickup — assumes ~25 km/h average city speed
+  const driverEtaMin = useMemo(() => {
+    if (!driverLocation || !pickupCoords) return null;
+    const km = haversineKm(
+      driverLocation.latitude, driverLocation.longitude,
+      pickupCoords.latitude, pickupCoords.longitude,
+    );
+    return Math.max(1, Math.ceil((km / 25) * 60));
+  }, [driverLocation, pickupCoords]);
+
   // ─────────────────────────────────────────────────────────────────────
   return (
     <View style={s.container}>
@@ -454,21 +509,29 @@ export default function HomeScreen() {
       >
         {pickupCoords && <Marker coordinate={pickupCoords} title="Pickup" pinColor="#F5A623" />}
         {dropoffCoords && <Marker coordinate={dropoffCoords} title="Dropoff" pinColor="#4CAF50" />}
-        {driverLocation && (
+        {driverLocation && ['accepted', 'en_route', 'arrived', 'in_progress'].includes(tripStatus) && (
           <Marker coordinate={driverLocation} title="Driver">
             <View style={s.driverMarker}>
               <Ionicons name="car" size={14} color="#FFF" />
             </View>
           </Marker>
         )}
-        {pickupCoords && dropoffCoords && (
+        {/* Route line: driver→pickup while approaching; pickup→dropoff otherwise */}
+        {driverLocation && (tripStatus === 'accepted' || tripStatus === 'en_route') && pickupCoords ? (
+          <Polyline
+            coordinates={[driverLocation, pickupCoords]}
+            strokeColor="#F5A623"
+            strokeWidth={3}
+            lineDashPattern={[6, 3]}
+          />
+        ) : (pickupCoords && dropoffCoords && (
           <Polyline
             coordinates={[pickupCoords, dropoffCoords]}
             strokeColor="#F5A623"
             strokeWidth={2}
             lineDashPattern={[8, 4]}
           />
-        )}
+        ))}
       </MapView>
 
       {/* ── Top bar ───────────────────────────────────────────────────── */}
@@ -589,6 +652,29 @@ export default function HomeScreen() {
                 }
                 <Text style={s.statusLabel}>{statusLabel[tripStatus]}</Text>
               </View>
+
+              {/* Driver approach card — visible when driver is on the way */}
+              {driverLocation && (tripStatus === 'accepted' || tripStatus === 'en_route') && (
+                <View style={s.driverApproachCard}>
+                  <View style={s.driverApproachLeft}>
+                    <View style={s.driverApproachIcon}>
+                      <Ionicons name="car" size={18} color="#F5A623" />
+                    </View>
+                    <View>
+                      <Text style={s.driverApproachName}>
+                        {driverName || 'Your driver'}
+                      </Text>
+                      <Text style={s.driverApproachSub}>is on the way</Text>
+                    </View>
+                  </View>
+                  {driverEtaMin != null && (
+                    <View style={s.etaBadge}>
+                      <Text style={s.etaValue}>{driverEtaMin}</Text>
+                      <Text style={s.etaUnit}>min</Text>
+                    </View>
+                  )}
+                </View>
+              )}
 
               {/* Compact route */}
               <View style={s.activeRouteCard}>
@@ -790,7 +876,7 @@ export default function HomeScreen() {
       </Modal>
 
       {/* ── RATING MODAL ─────────────────────────────────────────── */}
-      <Modal visible={showRatingModal} transparent animationType="fade">
+      <Modal visible={showRatingModal} transparent animationType="fade" onRequestClose={() => submitRating(0)}>
         <View style={s.ratingOverlay}>
           <View style={s.ratingCard}>
             <Text style={s.ratingTitle}>How was your driver?</Text>
@@ -987,6 +1073,29 @@ const s = StyleSheet.create({
     width: 28, height: 28, alignItems: 'center', justifyContent: 'center',
     borderWidth: 2, borderColor: '#FFF',
   },
+
+  // Driver approach info card
+  driverApproachCard: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: 'rgba(245,166,35,0.07)',
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
+    borderWidth: 1, borderColor: 'rgba(245,166,35,0.18)',
+  },
+  driverApproachLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  driverApproachIcon: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: 'rgba(245,166,35,0.12)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  driverApproachName: { fontSize: 15, fontWeight: '600', color: '#FFF' },
+  driverApproachSub: { fontSize: 12, color: '#888', marginTop: 1 },
+  etaBadge: {
+    alignItems: 'center',
+    backgroundColor: '#F5A623', borderRadius: 10,
+    paddingHorizontal: 12, paddingVertical: 6, minWidth: 52,
+  },
+  etaValue: { fontSize: 18, fontWeight: '800', color: '#000', lineHeight: 20 },
+  etaUnit: { fontSize: 10, fontWeight: '600', color: '#000', letterSpacing: 0.5 },
 
   // ── Search modal ──────────────────────────────────────────────────────
   modalContainer: { flex: 1, backgroundColor: '#0A0A0A' },

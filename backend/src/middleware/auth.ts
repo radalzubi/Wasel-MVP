@@ -28,11 +28,16 @@ export async function requireAuth(req: AuthRequest, res: Response, next: NextFun
   // in-memory auth state may hold a different user's JWT from a recent
   // signInWithPassword() call in auth routes, causing the role lookup to run
   // under the wrong uid and return no rows even for valid drivers.
-  const { data: driver } = await supabaseAdmin
+  const { data: driver, error: roleErr } = await supabaseAdmin
     .from('drivers')
     .select('id')
     .eq('id', user.id)
     .maybeSingle();
+
+  if (roleErr) {
+    console.error('[requireAuth] role lookup failed for user', user.id, ':', roleErr.message);
+    return res.status(503).json({ error: 'Unable to verify role. Please try again.' });
+  }
 
   req.userRole = driver ? 'driver' : 'rider';
   next();

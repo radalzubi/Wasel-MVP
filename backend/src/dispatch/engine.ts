@@ -135,19 +135,33 @@ export async function dispatchTrip(
 
   const winner = scored[0];
 
-  await supabase.from('trips').update({
+  const { error: tripUpdateErr } = await supabase.from('trips').update({
     status:    'dispatching',
     driver_id: winner.driverId,
     bmp_score: winner.score,
   }).eq('id', tripId);
 
+  if (tripUpdateErr) {
+    console.error('[dispatch] trip status update failed for trip', tripId, ':', tripUpdateErr.message);
+    return null;
+  }
+
   const expiresAt = new Date(Date.now() + OFFER_TIMEOUT_SECONDS * 1_000).toISOString();
 
-  await supabase.from('trip_offers').insert({
+  const { error: offerInsertErr } = await supabase.from('trip_offers').insert({
     trip_id:    tripId,
     driver_id:  winner.driverId,
     expires_at: expiresAt,
   });
+
+  if (offerInsertErr) {
+    console.error('[dispatch] offer insert failed for trip', tripId, ':', offerInsertErr.message);
+    // Rollback the trip status so the poller will retry from 'requested'
+    await supabase.from('trips')
+      .update({ status: 'requested', driver_id: null, bmp_score: null })
+      .eq('id', tripId);
+    return null;
+  }
 
   // No setTimeout here — the poller owns the retry lifecycle (P6).
   return winner.driverId;
@@ -200,8 +214,21 @@ export function startDispatchPoller(): ReturnType<typeof setInterval> {
       for (const trip of stuckTrips ?? []) {
         const ageMs = Date.now() - new Date(trip.created_at).getTime();
         if (ageMs > MAX_REQUESTED_AGE_MS) {
+          const { error: cancelErr } = await supabase
+            .from('trips').update({ status: 'cancelled' }).eq('id', trip.id);
+          if (cancelErr) {
+            console.error(`[dispatch-poller] auto-cancel failed for trip ${trip.id}:`, cancelErr.message);
+          } else {
+            console.log(`[dispatch-poller] trip ${trip.id} cancelled — no driver found after ${Math.round(ageMs / 1000)}s`);
+          }
+          continue;
+        }
+        // Guard: null coordinates (data corruption / partial insert) would cause
+        // haversineKm to return NaN, silently bypassing the radius check and
+        // selecting an arbitrary driver. Cancel immediately instead of retrying.
+        if (trip.pickup_lat == null || trip.pickup_lng == null) {
+          console.error(`[dispatch-poller] trip ${trip.id} has null coordinates — cancelling`);
           await supabase.from('trips').update({ status: 'cancelled' }).eq('id', trip.id);
-          console.log(`[dispatch-poller] trip ${trip.id} cancelled — no driver found after ${Math.round(ageMs / 1000)}s`);
           continue;
         }
         dispatchTrip(trip.id, trip.pickup_lat, trip.pickup_lng)
@@ -241,10 +268,14 @@ export function startDispatchPoller(): ReturnType<typeof setInterval> {
 
         if ((offerCount ?? 0) >= MAX_DISPATCH_ROUNDS) {
           // All rounds exhausted — cancel the trip.
-          await supabase.from('trips')
+          const { error: cancelErr } = await supabase.from('trips')
             .update({ status: 'cancelled' })
             .eq('id', offer.trip_id);
-          console.log(`[dispatch-poller] trip ${offer.trip_id} cancelled — exhausted ${MAX_DISPATCH_ROUNDS} rounds`);
+          if (cancelErr) {
+            console.error(`[dispatch-poller] auto-cancel failed for trip ${offer.trip_id}:`, cancelErr.message);
+          } else {
+            console.log(`[dispatch-poller] trip ${offer.trip_id} cancelled — exhausted ${MAX_DISPATCH_ROUNDS} rounds`);
+          }
           continue;
         }
 

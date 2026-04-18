@@ -94,11 +94,16 @@ router.post('/', requireAuth, requireRider, async (req: AuthRequest, res) => {
   // Prevent dispatch-timer accumulation: one active trip per rider at a time.
   // Without this, a rider can create trips faster than drivers accept, building
   // up unbounded in-memory setTimeout chains in the dispatch engine.
-  const { count: activeCount } = await supabase
+  const { count: activeCount, error: countErr } = await supabase
     .from('trips')
     .select('id', { count: 'exact', head: true })
     .eq('rider_id', req.userId)
     .not('status', 'in', '("completed","cancelled")');
+
+  if (countErr) {
+    console.error('[trips POST] active-count query failed:', countErr.message);
+    return res.status(500).json({ error: 'Failed to check active trips' });
+  }
 
   if ((activeCount ?? 0) > 0) {
     return res.status(409).json({ error: 'You already have an active trip in progress.' });
@@ -162,9 +167,24 @@ router.post('/:id/accept', requireAuth, requireDriver, async (req: AuthRequest, 
     return res.status(410).json({ error: 'Offer has expired' });
   }
 
-  await supabase.from('trip_offers')
+  // Optimistic concurrency guard: only update if the offer is still pending.
+  // Without this, a race between the poller (which expires offers) and the
+  // driver accepting can result in two drivers being assigned to the same trip.
+  const { data: acceptedRows, error: offerUpdateErr } = await supabase
+    .from('trip_offers')
     .update({ status: 'accepted' })
-    .eq('id', offer.id);
+    .eq('id', offer.id)
+    .eq('status', 'pending')  // atomic guard — prevents double-processing
+    .select('id');
+
+  if (offerUpdateErr) {
+    console.error('[trips/accept] offer update failed:', offerUpdateErr.message);
+    return res.status(500).json({ error: 'Failed to accept offer' });
+  }
+  if (!acceptedRows?.length) {
+    // Poller expired this offer between our read and this write
+    return res.status(410).json({ error: 'Offer has expired or was already processed' });
+  }
 
   const { error } = await supabase.from('trips')
     .update({ status: 'accepted', driver_id: req.userId })
@@ -314,7 +334,7 @@ router.post('/:id/rate', requireAuth, async (req: AuthRequest, res) => {
 
   const { data: trip } = await supabase
     .from('trips')
-    .select('rider_id, driver_id, status')
+    .select('rider_id, driver_id, status, driver_rating, rider_rating')
     .eq('id', req.params.id)
     .maybeSingle();
 
@@ -325,11 +345,17 @@ router.post('/:id/rate', requireAuth, async (req: AuthRequest, res) => {
   const isDriver = trip.driver_id === req.userId;
   if (!isRider && !isDriver) return res.status(403).json({ error: 'Not your trip' });
 
-  // Rider rates driver; driver rates rider
+  // Rider rates driver; driver rates rider — prevent double submission
   if (parsed.data.ratee === 'driver' && !isRider)  return res.status(403).json({ error: 'Only the rider can rate the driver' });
   if (parsed.data.ratee === 'rider'  && !isDriver) return res.status(403).json({ error: 'Only the driver can rate the rider' });
 
   const column = parsed.data.ratee === 'driver' ? 'driver_rating' : 'rider_rating';
+
+  // Idempotency guard: reject if already rated
+  if (trip[column] != null) {
+    return res.status(409).json({ error: 'Already rated' });
+  }
+
   const { error } = await supabase
     .from('trips')
     .update({ [column]: parsed.data.rating })

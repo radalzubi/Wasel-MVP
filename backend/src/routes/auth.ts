@@ -222,7 +222,8 @@ router.post('/verify', otpLimiter, async (req, res) => {
     const creds   = DEV_USERS[devUser.role];
 
     // Ensure the test user exists in Supabase Auth
-    const { error: createErr } = await supabase.auth.admin.createUser({
+    // Use supabaseAdmin to avoid user-JWT pollution on the shared supabase client
+    const { error: createErr } = await supabaseAdmin.auth.admin.createUser({
       email:         creds.email,
       password:      creds.password,
       email_confirm: true,
@@ -276,7 +277,13 @@ router.post('/verify', otpLimiter, async (req, res) => {
 
   if (error || !data.session) return res.status(401).json({ error: 'Invalid or expired OTP' });
 
-  const userId = data.user!.id;
+  // Guard against Supabase returning a session without an embedded user object
+  if (!data.user) {
+    console.error('[verify] OTP succeeded but no user in response');
+    return res.status(500).json({ error: 'Authentication error. Please try again.' });
+  }
+
+  const userId = data.user.id;
 
   if (role === 'rider') {
     // supabaseAdmin: avoids user-JWT pollution from verifyOtp() above
@@ -287,7 +294,8 @@ router.post('/verify', otpLimiter, async (req, res) => {
       console.error('[verify] Rider upsert failed:', upsertErr.message);
       return res.status(500).json({ error: 'Failed to create rider profile' });
     }
-    await applyWaitlistMembership(userId, phone, 'riders');
+    // Non-fatal: waitlist membership failure should not block login
+    try { await applyWaitlistMembership(userId, phone, 'riders'); } catch { /* non-fatal */ }
   } else {
     // Drivers must be pre-approved — check for an existing profile
     const { data: existingDriver } = await supabaseAdmin
@@ -307,7 +315,8 @@ router.post('/verify', otpLimiter, async (req, res) => {
       });
     }
 
-    await applyWaitlistMembership(userId, phone, 'drivers');
+    // Non-fatal: waitlist membership failure should not block login
+    try { await applyWaitlistMembership(userId, phone, 'drivers'); } catch { /* non-fatal */ }
   }
 
   res.json({ session: data.session, user: { id: userId, phone, role } });
@@ -353,7 +362,8 @@ router.post('/dev-login', otpLimiter, async (req, res) => {
   });
 
   if (error) {
-    const { error: createErr } = await supabase.auth.admin.createUser({
+    // Use supabaseAdmin to avoid JWT-pollution on the shared supabase client
+    const { error: createErr } = await supabaseAdmin.auth.admin.createUser({
       email:         creds.email,
       password:      creds.password,
       email_confirm: true,

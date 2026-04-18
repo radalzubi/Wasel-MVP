@@ -6,6 +6,7 @@ import {
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { supabase } from '../../lib/supabase';
@@ -71,7 +72,8 @@ export default function DashboardScreen() {
   const pulseLoopRef = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
-    if (offerTimer <= 5 && offer) {
+    const isUrgent = offerTimer <= 5;
+    if (isUrgent && offer) {
       pulseLoopRef.current = Animated.loop(
         Animated.sequence([
           Animated.timing(pulseAnim, { toValue: 0.4, duration: 300, useNativeDriver: true }),
@@ -86,7 +88,7 @@ export default function DashboardScreen() {
     return () => {
       pulseLoopRef.current?.stop();
     };
-  }, [offerTimer <= 5, !!offer]);
+  }, [offerTimer, offer]);
 
   // Fetch driver profile for tier badge
   useEffect(() => {
@@ -349,6 +351,7 @@ export default function DashboardScreen() {
 
   async function submitRating(stars: number) {
     setShowRatingModal(false);
+    setRatingStars(0); // reset stars for next time
     if (stars > 0 && ratingTripId) {
       try {
         const session = await supabase.auth.getSession();
@@ -502,7 +505,7 @@ export default function DashboardScreen() {
       </View>
 
       {/* ── RIDER RATING MODAL ───────────────────────────────────── */}
-      <Modal visible={showRatingModal} transparent animationType="fade">
+      <Modal visible={showRatingModal} transparent animationType="fade" onRequestClose={() => submitRating(0)}>
         <View style={styles.ratingOverlay}>
           <View style={styles.ratingCard}>
             <Text style={styles.ratingTitle}>How was your rider?</Text>
