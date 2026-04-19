@@ -155,7 +155,7 @@ router.post('/:id/accept', requireAuth, requireDriver, async (req: AuthRequest, 
   if (!isValidUUID(tripId)) return res.status(400).json({ error: 'Invalid trip ID' });
 
   // Verify this driver has a valid pending offer for this trip
-  const { data: offer } = await supabase
+  const { data: offer, error: offerFetchErr } = await supabase
     .from('trip_offers')
     .select('id, expires_at')
     .eq('trip_id', tripId)
@@ -163,6 +163,10 @@ router.post('/:id/accept', requireAuth, requireDriver, async (req: AuthRequest, 
     .eq('status', 'pending')
     .maybeSingle();
 
+  if (offerFetchErr) {
+    console.error('[trips/accept] offer fetch DB error for trip', tripId, ':', offerFetchErr.message);
+    return res.status(500).json({ error: 'Failed to fetch offer' });
+  }
   if (!offer) return res.status(403).json({ error: 'No active offer for this driver' });
   if (new Date(offer.expires_at) < new Date()) {
     return res.status(410).json({ error: 'Offer has expired' });
@@ -241,12 +245,16 @@ router.post('/:id/status', requireAuth, async (req: AuthRequest, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
   // Verify caller owns this trip
-  const { data: trip } = await supabase
+  const { data: trip, error: statusFetchErr } = await supabase
     .from('trips')
     .select('rider_id, driver_id, status')
     .eq('id', req.params.id)
     .maybeSingle();
 
+  if (statusFetchErr) {
+    console.error('[trips/status] DB error for trip', req.params.id, ':', statusFetchErr.message);
+    return res.status(500).json({ error: 'Failed to fetch trip' });
+  }
   if (!trip) return res.status(404).json({ error: 'Trip not found' });
 
   const isDriver = trip.driver_id === req.userId;
@@ -536,12 +544,16 @@ router.post('/:id/rate', requireAuth, async (req: AuthRequest, res) => {
   const parsed = RateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const { data: trip } = await supabase
+  const { data: trip, error: tripFetchErr } = await supabase
     .from('trips')
     .select('rider_id, driver_id, status, driver_rating, rider_rating')
     .eq('id', req.params.id)
     .maybeSingle();
 
+  if (tripFetchErr) {
+    console.error('[trips/rate] DB error for trip', req.params.id, ':', tripFetchErr.message);
+    return res.status(500).json({ error: 'Failed to fetch trip' });
+  }
   if (!trip) return res.status(404).json({ error: 'Trip not found' });
   if (trip.status !== 'completed') return res.status(409).json({ error: 'Can only rate completed trips' });
 

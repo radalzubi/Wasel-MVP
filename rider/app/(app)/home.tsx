@@ -231,7 +231,10 @@ export default function HomeScreen() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: { fare_jd: number; polyline: string | null } = await res.json();
       if (!isMounted.current) return;
-      setFare(data.fare_jd.toFixed(2));
+      // Guard against null/NaN from backend — .toFixed() on null throws TypeError
+      if (typeof data.fare_jd === 'number' && isFinite(data.fare_jd)) {
+        setFare(data.fare_jd.toFixed(2));
+      }
       setRoutePolyline(data.polyline ?? null);
     } catch {
       // Fallback: keep the client-side haversine fare already set; clear polyline
@@ -356,8 +359,26 @@ export default function HomeScreen() {
           if (!res.ok || !isMounted.current) return;
           if (currentTripIdRef.current !== capturedTripId) return;
           const data = await res.json();
-          if (data.status && data.status !== 'requested') setTripStatus(data.status as TripStatus);
-          if (data.driver_id) setDriverId(data.driver_id);
+          if (!data.status || data.status === 'requested') {
+            // 'requested' or missing: dispatch is still pending, no state update needed
+          } else if (data.status === 'cancelled') {
+            // Trip was already cancelled before the Realtime channel connected.
+            // The postgres_changes handler will NOT fire for this since we just
+            // subscribed — so we must handle the terminal state here manually.
+            // selfCancelledRef stays false (we didn't cancel it), which is
+            // correct: we want the "trip cancelled" alert to show if applicable.
+            setTimeout(() => { if (isMounted.current) resetTripState(); }, 0);
+          } else if (data.status === 'completed') {
+            // Trip was already completed — show rating modal and reset.
+            if (isMounted.current) {
+              setRatingTripId(capturedTripId);
+              setRatingStars(0);
+              setShowRatingModal(true);
+            }
+          } else {
+            setTripStatus(data.status as TripStatus);
+            if (data.driver_id) setDriverId(data.driver_id);
+          }
         } catch (err) {
           console.error('[trip-sub] subscribe fetch error:', err);
         }
@@ -466,7 +487,11 @@ export default function HomeScreen() {
       const url = `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=8&viewbox=34.9,29.1,39.3,33.4&bounded=0&accept-language=en&addressdetails=1`;
       const res = await fetch(url, { signal: ac.signal, headers: { 'User-Agent': 'WaselApp/1.0' } });
       if (!isMounted.current) return;
-      setSuggestions(await res.json());
+      // Guard: Nominatim occasionally returns an error object or empty body on
+      // rate-limit / server error. If the response isn't an array, treat it as
+      // "no results" rather than crashing with a render-time type error.
+      const json = await res.json();
+      setSuggestions(Array.isArray(json) ? json : []);
     } catch (err: unknown) {
       if ((err as Error)?.name === 'AbortError') return; // intentional abort, not an error
       if (!isMounted.current) return;
@@ -574,14 +599,17 @@ export default function HomeScreen() {
       Alert.alert(t('setPickupDropoff'), t('tapMapDest2'));
       return;
     }
+    // Reset cancel signals first — must happen before the in-flight guard so
+    // that a 409 "Cancel & Retry" path (which calls handleRequestRide again
+    // after a cancel) always starts with clean state. If we reset AFTER the
+    // guard, a stale cancelledRef=true from the prior cancel-loading flow
+    // would immediately short-circuit the retry request at the post-await check.
+    cancelledRef.current = false;
+    selfCancelledRef.current = false;
+
     // Double-tap guard: prevent concurrent requests (second tap while first is in-flight)
     if (requestInFlightRef.current) return;
     requestInFlightRef.current = true;
-
-    // Reset cancel signals BEFORE any await so that a cancel pressed during
-    // getSession() cannot be overwritten by code running after the await resolves.
-    cancelledRef.current = false;
-    selfCancelledRef.current = false;
 
     // Token check BEFORE showing the loading state or making any request
     const { data: { session } } = await supabase.auth.getSession();
@@ -808,16 +836,30 @@ export default function HomeScreen() {
             lineDashPattern={[6, 3]}
           />
         ) : (pickupCoords && dropoffCoords && (
-          routePolyline ? (
-            <Polyline
-              coordinates={PolylineDecoder.decode(routePolyline).map(([lat, lng]: [number, number]) => ({
-                latitude: lat,
-                longitude: lng,
-              }))}
-              strokeColor="#F5A623"
-              strokeWidth={3}
-            />
-          ) : (
+          routePolyline ? (() => {
+            // decode() can throw on malformed strings and returns NaN coordinates
+            // on truncated data — both crash Android's native MapView layer.
+            // Parse defensively: filter out any non-finite coord pairs and fall
+            // back to the straight-line polyline if fewer than 2 valid points remain.
+            try {
+              const coords = PolylineDecoder.decode(routePolyline)
+                .map(([lat, lng]: [number, number]) => ({ latitude: lat, longitude: lng }))
+                .filter(c => isFinite(c.latitude) && isFinite(c.longitude));
+              if (coords.length >= 2) {
+                return (
+                  <Polyline coordinates={coords} strokeColor="#F5A623" strokeWidth={3} />
+                );
+              }
+            } catch { /* fall through to straight-line fallback below */ }
+            return (
+              <Polyline
+                coordinates={[pickupCoords!, dropoffCoords!]}
+                strokeColor="#F5A623"
+                strokeWidth={2}
+                lineDashPattern={[8, 4]}
+              />
+            );
+          })() : (
             <Polyline
               coordinates={[pickupCoords, dropoffCoords]}
               strokeColor="#F5A623"
@@ -989,7 +1031,11 @@ export default function HomeScreen() {
                     {driverPhone && (
                       <TouchableOpacity
                         style={s.callBtn}
-                        onPress={() => Linking.openURL(`tel:${driverPhone}`)}
+                        onPress={() => {
+                          // .catch() required — Linking.openURL rejects on Android when
+                          // the tel: URL is empty/invalid, crashing the JS thread if unhandled.
+                          Linking.openURL(`tel:${driverPhone}`).catch(() => {});
+                        }}
                       >
                         <Ionicons name="call" size={16} color="#FFF" />
                       </TouchableOpacity>

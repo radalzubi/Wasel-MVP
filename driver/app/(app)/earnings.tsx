@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, FlatList, StyleSheet, ActivityIndicator,
   RefreshControl, Platform,
@@ -31,23 +31,34 @@ export default function EarningsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Prevents setState after unmount if the user navigates away before the fetch completes
+  const isMounted = useRef(true);
+  useEffect(() => {
+    isMounted.current = true;
+    return () => { isMounted.current = false; };
+  }, []);
+
   async function load(isRefresh = false) {
     if (isRefresh) setRefreshing(true); else setLoading(true);
     try {
       const session = await supabase.auth.getSession();
       const token = session.data.session?.access_token;
+      if (!isMounted.current) return;
       const res = await fetch(`${API_URL}/api/drivers/trips`, {
         headers: { Authorization: `Bearer ${token ?? ''}` },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
+      if (!isMounted.current) return;
       setTrips(data.trips ?? []);
       setSummary(data.summary ?? null);
     } catch {
-      // Silent
+      // Silent — stale data is fine
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (isMounted.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }
 
@@ -80,11 +91,11 @@ export default function EarningsScreen() {
         {summary && (
           <View style={s.summaryRow}>
             <View style={s.summaryCard}>
-              <Text style={s.summaryVal}>{summary.today_earnings_jd.toFixed(2)} JD</Text>
+              <Text style={s.summaryVal}>{(summary.today_earnings_jd ?? 0).toFixed(2)} JD</Text>
               <Text style={s.summaryLbl}>Today</Text>
             </View>
             <View style={s.summaryCard}>
-              <Text style={s.summaryVal}>{summary.total_earnings_jd.toFixed(2)} JD</Text>
+              <Text style={s.summaryVal}>{(summary.total_earnings_jd ?? 0).toFixed(2)} JD</Text>
               <Text style={s.summaryLbl}>All time</Text>
             </View>
             <View style={s.summaryCard}>

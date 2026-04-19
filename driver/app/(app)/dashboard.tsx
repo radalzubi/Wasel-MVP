@@ -128,6 +128,9 @@ export default function DashboardScreen() {
   // that fires back to the same subscription doesn't wrongly show
   // "The rider has cancelled this trip" to the driver.
   const driverCancelledRef = useRef(false);
+  // Stable ref so map callbacks always use the latest GPS position without
+  // relying on a stale closure captured at effect-creation time.
+  const locationRef = useRef<LatLng | null>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const pulseLoopRef = useRef<Animated.CompositeAnimation | null>(null);
 
@@ -171,6 +174,10 @@ export default function DashboardScreen() {
   // Keep currentTripRef in sync so the offer handler can check it synchronously
   // without depending on stale closure values.
   useEffect(() => { currentTripRef.current = currentTrip; }, [currentTrip]);
+
+  // Keep locationRef in sync so map callbacks always use the latest GPS fix
+  // instead of a stale closure value captured at effect-creation time.
+  useEffect(() => { locationRef.current = location; }, [location]);
 
   // ── Session helper — one place to get the auth token ─────────────────────
   const getToken = useCallback(async (): Promise<string | null> => {
@@ -329,68 +336,109 @@ export default function DashboardScreen() {
       setTripDetails(null);
       return;
     }
+
+    // didCancel is set to true by the cleanup function below.
+    // Every async continuation checks it before touching React state or the
+    // MapView — this prevents the race condition where a cancel clears the trip
+    // but the in-flight fetch completes afterwards and re-sets tripDetails
+    // (which would then fire fitToCoordinates in an inconsistent state and
+    // crash the native MapView on Android).
+    let didCancel = false;
+
     (async () => {
       try {
         const token = await getToken();
-        if (!token) return;
+        if (!token || didCancel || !isMounted.current) return;
 
         const tripRes = await fetch(`${API_URL}/api/trips/${currentTrip.id}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (tripRes.ok && isMounted.current) {
-          const d = await tripRes.json();
-          if (!isMounted.current) return;
-          setTripDetails({
-            pickup_address:  d.pickup_address  ?? 'Pickup location',
-            dropoff_address: d.dropoff_address ?? 'Dropoff location',
-            fare_amount:     d.fare_amount != null ? `${d.fare_amount} JD` : '',
-            pickup_lat:  d.pickup_lat,
-            pickup_lng:  d.pickup_lng,
-            dropoff_lat: d.dropoff_lat,
-            dropoff_lng: d.dropoff_lng,
-          });
-          if (d.pickup_lat != null && d.pickup_lng != null) {
-            const pickupCoord = { latitude: d.pickup_lat, longitude: d.pickup_lng };
-            setTimeout(() => {
-              if (!isMounted.current) return;
-              if (location) {
-                // fitToCoordinates requires ≥2 points — crashes natively with 1 point on Android
-                mapRef.current?.fitToCoordinates([location, pickupCoord], {
-                  edgePadding: { top: 100, right: 60, bottom: 320, left: 60 },
-                  animated: true,
-                });
-              } else {
-                // GPS not resolved yet — centre on pickup without fitting
-                mapRef.current?.animateToRegion({
-                  ...pickupCoord,
-                  latitudeDelta: 0.02,
-                  longitudeDelta: 0.02,
-                }, 600);
-              }
-            }, 300);
-          }
+        if (!tripRes.ok || didCancel || !isMounted.current) return;
+
+        const d = await tripRes.json();
+        if (didCancel || !isMounted.current) return;
+
+        setTripDetails({
+          pickup_address:  d.pickup_address  ?? 'Pickup location',
+          dropoff_address: d.dropoff_address ?? 'Dropoff location',
+          fare_amount:     d.fare_amount != null ? `${d.fare_amount} JD` : '',
+          pickup_lat:  d.pickup_lat,
+          pickup_lng:  d.pickup_lng,
+          dropoff_lat: d.dropoff_lat,
+          dropoff_lng: d.dropoff_lng,
+        });
+
+        // Guard: coordinates must be finite numbers (not null/NaN/Infinity) —
+        // passing invalid values to MapView causes a native crash on Android.
+        if (
+          typeof d.pickup_lat === 'number' && isFinite(d.pickup_lat) &&
+          typeof d.pickup_lng === 'number' && isFinite(d.pickup_lng)
+        ) {
+          const pickupCoord = { latitude: d.pickup_lat, longitude: d.pickup_lng };
+          setTimeout(() => {
+            // Re-check both didCancel and isMounted at fire time — cancel may
+            // have happened during the 300ms delay.
+            if (didCancel || !isMounted.current) return;
+            // Use locationRef (not the stale closure value) so we always have
+            // the latest GPS position at the moment the map animates.
+            const currentLoc = locationRef.current;
+            if (currentLoc) {
+              // fitToCoordinates requires ≥2 points — crashes natively with 1 point on Android
+              mapRef.current?.fitToCoordinates([currentLoc, pickupCoord], {
+                edgePadding: { top: 100, right: 60, bottom: 320, left: 60 },
+                animated: true,
+              });
+            } else {
+              // GPS not resolved yet — centre on pickup without fitting
+              mapRef.current?.animateToRegion({
+                ...pickupCoord,
+                latitudeDelta: 0.02,
+                longitudeDelta: 0.02,
+              }, 600);
+            }
+          }, 300);
         }
 
-        if (!isMounted.current) return;
+        if (didCancel || !isMounted.current) return;
+
         const contactRes = await fetch(`${API_URL}/api/trips/${currentTrip.id}/contact`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (contactRes.ok && isMounted.current) {
-          const c = await contactRes.json();
-          if (!isMounted.current) return;
-          if (c.role === 'rider') {
-            setRiderInfo({ name: c.name ?? 'Rider', phone: c.phone ?? null });
-          }
+        if (!contactRes.ok || didCancel || !isMounted.current) return;
+
+        const c = await contactRes.json();
+        if (didCancel || !isMounted.current) return;
+        if (c.role === 'rider') {
+          setRiderInfo({ name: c.name ?? 'Rider', phone: c.phone ?? null });
         }
       } catch { /* non-fatal */ }
     })();
+
+    // Cleanup: signal all pending async work to abort so stale fetches cannot
+    // call setState or trigger map operations after this trip is cleared.
+    return () => { didCancel = true; };
   }, [currentTrip?.id, getToken]);
 
   // ── Realtime: rider cancels active trip ───────────────────────────────────
   useEffect(() => {
     if (!currentTrip) return;
+
+    // Tear down any pre-existing channel with the same name before creating a
+    // new one. In React Strict Mode (dev) effects run twice, and a fast
+    // double-restore can leave two subscriptions alive for the same trip ID —
+    // both handlers would fire on every CDC event, clearing state or showing
+    // the "rider cancelled" alert twice.
+    //
+    // NOTE: supabase-js prefixes channel topics internally as "realtime:<name>",
+    // so we compare against both forms to handle all client versions correctly.
+    const channelName = `trip-updates-${currentTrip.id}`;
+    const existing = supabase.getChannels().find(
+      c => c.topic === channelName || c.topic === `realtime:${channelName}`,
+    );
+    if (existing) supabase.removeChannel(existing);
+
     const channel = supabase
-      .channel(`trip-updates-${currentTrip.id}`)
+      .channel(channelName)
       .on('postgres_changes', {
         event: 'UPDATE', schema: 'public', table: 'trips',
         filter: `id=eq.${currentTrip.id}`,
@@ -538,7 +586,11 @@ export default function DashboardScreen() {
         setCurrentTrip({ id: acceptedOffer.trip_id, status: 'accepted' });
       }
     } catch {
-      Alert.alert('Could not accept trip', 'The offer may have expired. Please try again.');
+      // Guard: don't call Alert.alert after unmount — triggers a native bridge
+      // null-pointer crash on Android if the JS context is being torn down.
+      if (isMounted.current) {
+        Alert.alert('Could not accept trip', 'The offer may have expired. Please try again.');
+      }
     }
   }
 
@@ -595,17 +647,26 @@ export default function DashboardScreen() {
         setCurrentTrip(null);
         setRiderInfo(null);
         setTripDetails(null);
-      } else if (nextStatus !== 'cancelled') {
-        // Cancelled was already cleared optimistically above
+      } else if (nextStatus === 'cancelled') {
+        // State was already cleared optimistically above.
+        // Reset the flag after a short delay so the CDC echo for this cancel
+        // is silently ignored first — then future rider-cancels alert properly.
+        setTimeout(() => { driverCancelledRef.current = false; }, 4000);
+      } else {
         setCurrentTrip({ id: tripId, status: nextStatus as TripStatus });
       }
     } catch (err: unknown) {
+      // Guard: if the component unmounted while the network call was in-flight
+      // (e.g., session expiry triggered navigation), skip the Alert and setState
+      // calls — calling Alert.alert after the JS context is being torn down
+      // causes a native bridge null-pointer crash on Android.
+      if (!isMounted.current) return;
       const msg = err instanceof Error ? err.message : 'Please try again.';
       Alert.alert('Status update failed', msg);
       // If cancel failed (network error, server error, no session), restore
       // the trip UI so the driver can retry. Without this the driver's screen
       // shows no active trip while the rider still has a live booking.
-      if (nextStatus === 'cancelled' && isMounted.current) {
+      if (nextStatus === 'cancelled') {
         driverCancelledRef.current = false;
         setCurrentTrip(savedTrip);
         setRiderInfo(savedRiderInfo);
@@ -783,7 +844,13 @@ export default function DashboardScreen() {
                 {riderInfo.phone ? (
                   <TouchableOpacity
                     style={styles.callBtn}
-                    onPress={() => Linking.openURL(`tel:${riderInfo.phone}`)}
+                    onPress={() => {
+                      // .catch() required — Linking.openURL rejects on Android when
+                      // the tel: URL is empty/invalid, crashing the JS thread if unhandled.
+                      if (riderInfo.phone) {
+                        Linking.openURL(`tel:${riderInfo.phone}`).catch(() => {});
+                      }
+                    }}
                   >
                     <Ionicons name="call" size={15} color="#FFF" />
                     <Text style={styles.callBtnText}>Call</Text>

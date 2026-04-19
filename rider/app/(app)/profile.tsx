@@ -254,7 +254,7 @@ export default function ProfileScreen() {
             icon="chatbubble-outline"
             label="Contact support"
             chevron
-            onPress={() => Linking.openURL('mailto:support@wasel.jo')}
+            onPress={() => Linking.openURL('mailto:support@wasel.jo').catch(() => {})}
           />
         </View>
 

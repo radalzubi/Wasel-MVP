@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, FlatList, StyleSheet, ActivityIndicator,
   RefreshControl, Platform,
@@ -38,22 +38,33 @@ export default function TripsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Prevents setState after unmount if the user switches tabs before the fetch completes
+  const isMounted = useRef(true);
+  useEffect(() => {
+    isMounted.current = true;
+    return () => { isMounted.current = false; };
+  }, []);
+
   async function load(isRefresh = false) {
     if (isRefresh) setRefreshing(true); else setLoading(true);
     try {
       const session = await supabase.auth.getSession();
       const token = session.data.session?.access_token;
+      if (!isMounted.current) return;
       const res = await fetch(`${API_URL}/api/riders/trips`, {
         headers: { Authorization: `Bearer ${token ?? ''}` },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: TripRecord[] = await res.json();
+      if (!isMounted.current) return;
       setTrips(data);
     } catch {
       // Silent — stale data is fine
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (isMounted.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }
 
