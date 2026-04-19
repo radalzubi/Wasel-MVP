@@ -1,22 +1,13 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect } from 'react';
-import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { registerPushToken } from '../../lib/notifications';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
 
 export default function AppLayout() {
   const { t } = useLanguage();
-  const { session } = useAuth();
   // bottom inset = home-indicator height (34pt on iPhone X+, 0 on older/Android)
   const { bottom } = useSafeAreaInsets();
-
-  useEffect(() => {
-    if (!session?.access_token) return;
-    registerPushToken(session.access_token);
-  }, [session?.access_token]);
 
   return (
     <ErrorBoundary>

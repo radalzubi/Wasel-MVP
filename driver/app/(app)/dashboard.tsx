@@ -249,35 +249,6 @@ export default function DashboardScreen() {
     return () => { pulseLoopRef.current?.stop(); };
   }, [offerTimer, offer]);
 
-  // ── Register Expo push token so the backend can alert this driver ────────────
-  // Token is stored in the DB. The backend's sendPush() calls use it to deliver
-  // "New Ride Request" notifications when the app is backgrounded.
-  // Only runs when the driver is authenticated AND approved — unapproved drivers
-  // get no offers, so registering their token early is pointless.
-  // Non-fatal: Realtime is always the fallback for foreground offer delivery.
-  useEffect(() => {
-    if (!user?.id || !isApproved) return;
-    (async () => {
-      try {
-        const { status } = await Notifications.requestPermissionsAsync();
-        if (status !== 'granted') return;
-        // getExpoPushTokenAsync works in Expo Go without a projectId.
-        // Standalone builds may need: { projectId: Constants.expoConfig?.extra?.eas?.projectId }
-        const tokenData = await Notifications.getExpoPushTokenAsync().catch(() => null);
-        if (!tokenData?.data || !isMounted.current) return;
-        const token = await getToken();
-        if (!token || !isMounted.current) return;
-        await fetch(`${API_URL}/api/drivers/push-token`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ token: tokenData.data }),
-        });
-      } catch (e) {
-        console.warn('[push] driver token registration failed:', e);
-      }
-    })();
-  }, [user?.id, isApproved, getToken]);
-
   // ── Driver bootstrap: profile fetch + active-trip restore ────────────────
   //
   // Coherent policy (mirror image of rider-side bootstrap in home.tsx):
