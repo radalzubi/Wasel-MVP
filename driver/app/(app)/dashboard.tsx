@@ -643,26 +643,31 @@ export default function DashboardScreen() {
             <View style={styles.driverMarker}><View style={styles.driverMarkerDot} /></View>
           </Marker>
         )}
-        {tripDetails?.pickup_lat != null && (
+        {/* Guard BOTH lat AND lng — passing a null coordinate to MapView causes a native crash */}
+        {tripDetails?.pickup_lat != null && tripDetails?.pickup_lng != null && (
           <Marker
             coordinate={{ latitude: tripDetails.pickup_lat, longitude: tripDetails.pickup_lng }}
             title="Pickup" pinColor="#F5A623"
           />
         )}
-        {currentTrip?.status === 'in_progress' && tripDetails?.dropoff_lat != null && (
+        {currentTrip?.status === 'in_progress' &&
+          tripDetails?.dropoff_lat != null && tripDetails?.dropoff_lng != null && (
           <Marker
             coordinate={{ latitude: tripDetails.dropoff_lat, longitude: tripDetails.dropoff_lng }}
             title="Dropoff" pinColor="#4CAF50"
           />
         )}
-        {location && tripDetails?.pickup_lat != null &&
+        {location &&
+          tripDetails?.pickup_lat != null && tripDetails?.pickup_lng != null &&
           (currentTrip?.status === 'accepted' || currentTrip?.status === 'en_route') && (
           <Polyline
             coordinates={[location, { latitude: tripDetails.pickup_lat, longitude: tripDetails.pickup_lng }]}
             strokeColor="#F5A623" strokeWidth={3} lineDashPattern={[6, 3]}
           />
         )}
-        {currentTrip?.status === 'in_progress' && tripDetails?.pickup_lat != null && tripDetails?.dropoff_lat != null && (
+        {currentTrip?.status === 'in_progress' &&
+          tripDetails?.pickup_lat != null && tripDetails?.pickup_lng != null &&
+          tripDetails?.dropoff_lat != null && tripDetails?.dropoff_lng != null && (
           <Polyline
             coordinates={[
               { latitude: tripDetails.pickup_lat,  longitude: tripDetails.pickup_lng },
