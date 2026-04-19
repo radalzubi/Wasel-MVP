@@ -78,6 +78,11 @@ export default function HomeScreen() {
   // subscribe() callback that was in-flight during a reset will see null and bail out.
   const currentTripIdRef = useRef<string | null>(null);
 
+  // ── Map ready guard ──────────────────────────────────────────────────
+  // React Native Maps can crash if Markers/Polylines are added to the native
+  // map layer before onMapReady fires. Gate all map children on this flag.
+  const [mapReady, setMapReady] = useState(false);
+
   // ── Location ──────────────────────────────────────────────────────────
   const [location, setLocation] = useState<LatLng | null>(null);
   const [pickup, setPickup] = useState('');
@@ -176,7 +181,7 @@ export default function HomeScreen() {
             edgePadding: { top: 120, right: 60, bottom: 320, left: 60 },
             animated: true,
           });
-        }, 50);
+        }, 500);
       }
       setSearchMode('confirmed');
     }, [destName, destLat, destLng, pickupCoords, tripStatus]),
@@ -444,19 +449,24 @@ export default function HomeScreen() {
 
   // ── Auto-fit viewport to include driver + pickup when approaching ──────
   // Throttled to once every 5 s to avoid jarring continuous animations.
+  // 500 ms delay gives the native map layer time to finish reconciling any
+  // Marker/Polyline changes before the fit animation starts — calling
+  // fitToCoordinates while the native layer is still updating children
+  // causes intermittent native crashes on both iOS and Android.
   useEffect(() => {
     if (!driverLocation || !pickupCoords) return;
     if (tripStatus !== 'accepted' && tripStatus !== 'en_route') return;
     const now = Date.now();
     if (now - lastFitRef.current < 5000) return;
     lastFitRef.current = now;
-    setTimeout(() => {
+    const t = setTimeout(() => {
       if (!isMounted.current) return;
       mapRef.current?.fitToCoordinates([driverLocation, pickupCoords], {
         edgePadding: { top: 100, right: 60, bottom: 380, left: 60 },
         animated: true,
       });
-    }, 50);
+    }, 500);
+    return () => clearTimeout(t);
   }, [driverLocation, pickupCoords, tripStatus]);
 
   // ── Auto-focus the right input when modal opens ───────────────────────
@@ -547,7 +557,7 @@ export default function HomeScreen() {
             edgePadding: { top: 120, right: 60, bottom: 320, left: 60 },
             animated: true,
           });
-        }, 50);
+        }, 500);
       }
     } else {
       // Editing pickup — after selecting, move focus to destination
@@ -812,10 +822,14 @@ export default function HomeScreen() {
         showsUserLocation={showUserLocation}
         showsMyLocationButton={false}
         customMapStyle={DARK_MAP_STYLE}
+        onMapReady={() => setMapReady(true)}
       >
-        {pickupCoords && <Marker coordinate={pickupCoords} title="Pickup" pinColor="#F5A623" />}
-        {dropoffCoords && <Marker coordinate={dropoffCoords} title="Dropoff" pinColor="#4CAF50" />}
-        {driverLocation && ['accepted', 'en_route', 'arrived', 'in_progress'].includes(tripStatus) && (
+        {/* Gate ALL map children on mapReady — adding Markers/Polylines before the
+            native map layer fires onMapReady causes a native crash on Android and
+            intermittent crashes on iOS, especially during rapid state transitions. */}
+        {mapReady && pickupCoords && <Marker coordinate={pickupCoords} title="Pickup" pinColor="#F5A623" />}
+        {mapReady && dropoffCoords && <Marker coordinate={dropoffCoords} title="Dropoff" pinColor="#4CAF50" />}
+        {mapReady && driverLocation && ['accepted', 'en_route', 'arrived', 'in_progress'].includes(tripStatus) && (
           <Marker coordinate={driverLocation} title="Driver">
             <View style={s.driverMarker}>
               <Ionicons name="car" size={14} color="#FFF" />
@@ -823,7 +837,7 @@ export default function HomeScreen() {
           </Marker>
         )}
         {/* Route line: driver→pickup while approaching; pickup→dropoff otherwise */}
-        {driverLocation && (tripStatus === 'accepted' || tripStatus === 'en_route') && pickupCoords ? (
+        {mapReady && (driverLocation && (tripStatus === 'accepted' || tripStatus === 'en_route') && pickupCoords ? (
           <Polyline
             coordinates={[driverLocation, pickupCoords]}
             strokeColor="#F5A623"
@@ -862,7 +876,7 @@ export default function HomeScreen() {
               lineDashPattern={[8, 4]}
             />
           )
-        ))}
+        )))}
       </MapView>
 
       {/* ── Top bar ───────────────────────────────────────────────────── */}

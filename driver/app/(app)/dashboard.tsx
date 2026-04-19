@@ -106,6 +106,11 @@ export default function DashboardScreen() {
   const mapRef = useRef<MapView>(null);
   const isMounted = useRef(true);
 
+  // ── Map ready guard ──────────────────────────────────────────────────────
+  // Gate ALL map children on this flag — rendering Markers/Polylines before
+  // the native map layer fires onMapReady causes native crashes.
+  const [mapReady, setMapReady]               = useState(false);
+
   const [isOnline, setIsOnline]               = useState(false);
   const [isApproved, setIsApproved]           = useState<boolean>(false);
   const [location, setLocation]               = useState<LatLng | null>(null);
@@ -376,28 +381,25 @@ export default function DashboardScreen() {
           typeof d.pickup_lng === 'number' && isFinite(d.pickup_lng)
         ) {
           const pickupCoord = { latitude: d.pickup_lat, longitude: d.pickup_lng };
+          // 500 ms gives the native map layer time to finish reconciling any
+          // Marker/Polyline changes before calling fitToCoordinates — calling
+          // it while the native layer is still updating children can crash.
           setTimeout(() => {
-            // Re-check both didCancel and isMounted at fire time — cancel may
-            // have happened during the 300ms delay.
             if (didCancel || !isMounted.current) return;
-            // Use locationRef (not the stale closure value) so we always have
-            // the latest GPS position at the moment the map animates.
             const currentLoc = locationRef.current;
             if (currentLoc) {
-              // fitToCoordinates requires ≥2 points — crashes natively with 1 point on Android
               mapRef.current?.fitToCoordinates([currentLoc, pickupCoord], {
                 edgePadding: { top: 100, right: 60, bottom: 320, left: 60 },
                 animated: true,
               });
             } else {
-              // GPS not resolved yet — centre on pickup without fitting
               mapRef.current?.animateToRegion({
                 ...pickupCoord,
                 latitudeDelta: 0.02,
                 longitudeDelta: 0.02,
               }, 600);
             }
-          }, 300);
+          }, 500);
         }
 
         if (didCancel || !isMounted.current) return;
@@ -726,27 +728,29 @@ export default function DashboardScreen() {
         initialRegion={{ ...AMMAN, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
         showsUserLocation={false}
         customMapStyle={DARK_MAP_STYLE}
+        onMapReady={() => setMapReady(true)}
       >
-        {location && (
+        {/* Gate ALL map children on mapReady — adding Markers/Polylines before
+            the native map layer fires onMapReady causes native crashes. */}
+        {mapReady && location && (
           <Marker coordinate={location}>
             <View style={styles.driverMarker}><View style={styles.driverMarkerDot} /></View>
           </Marker>
         )}
-        {/* Guard BOTH lat AND lng — passing a null coordinate to MapView causes a native crash */}
-        {tripDetails?.pickup_lat != null && tripDetails?.pickup_lng != null && (
+        {mapReady && tripDetails?.pickup_lat != null && tripDetails?.pickup_lng != null && (
           <Marker
             coordinate={{ latitude: tripDetails.pickup_lat, longitude: tripDetails.pickup_lng }}
             title="Pickup" pinColor="#F5A623"
           />
         )}
-        {currentTrip?.status === 'in_progress' &&
+        {mapReady && currentTrip?.status === 'in_progress' &&
           tripDetails?.dropoff_lat != null && tripDetails?.dropoff_lng != null && (
           <Marker
             coordinate={{ latitude: tripDetails.dropoff_lat, longitude: tripDetails.dropoff_lng }}
             title="Dropoff" pinColor="#4CAF50"
           />
         )}
-        {location &&
+        {mapReady && location &&
           tripDetails?.pickup_lat != null && tripDetails?.pickup_lng != null &&
           (currentTrip?.status === 'accepted' || currentTrip?.status === 'en_route') && (
           <Polyline
@@ -754,7 +758,7 @@ export default function DashboardScreen() {
             strokeColor="#F5A623" strokeWidth={3} lineDashPattern={[6, 3]}
           />
         )}
-        {currentTrip?.status === 'in_progress' &&
+        {mapReady && currentTrip?.status === 'in_progress' &&
           tripDetails?.pickup_lat != null && tripDetails?.pickup_lng != null &&
           tripDetails?.dropoff_lat != null && tripDetails?.dropoff_lng != null && (
           <Polyline
