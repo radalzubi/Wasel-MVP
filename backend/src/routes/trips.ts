@@ -271,6 +271,15 @@ router.post('/:id/status', requireAuth, async (req: AuthRequest, res) => {
   // Enforce state-machine: reject illegal transitions.
   const allowedNext = VALID_TRANSITIONS[trip.status] ?? [];
   if (!allowedNext.includes(parsed.data.status)) {
+    // Idempotent cancel: if the trip is already cancelled (or completed) and
+    // the caller is requesting a cancel, treat it as success so the Cancel &
+    // Retry flow in the rider app doesn't get blocked by a stale terminal trip.
+    if (
+      parsed.data.status === 'cancelled' &&
+      (trip.status === 'cancelled' || trip.status === 'completed')
+    ) {
+      return res.json({ ok: true, status: trip.status, alreadyTerminal: true });
+    }
     return res.status(409).json({
       error:   `Cannot transition from '${trip.status}' to '${parsed.data.status}'`,
       allowed: allowedNext,

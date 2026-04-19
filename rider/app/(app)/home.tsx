@@ -264,41 +264,40 @@ export default function HomeScreen() {
     })();
   }, [user?.id]);
 
-  // ── Trip restore disabled for MVP testing ────────────────────────────────
-  // Re-enable the block below for production so riders who restart mid-trip
-  // are taken back to their active booking automatically.
-  // During testing we want a clean idle state on every app open so stale
-  // test data from previous sessions never bleeds through.
-  //
-  // useEffect(() => {
-  //   if (!user) return;
-  //   (async () => {
-  //     try {
-  //       const { data: { session } } = await supabase.auth.getSession();
-  //       const token = session?.access_token;
-  //       if (!token || !isMounted.current) return;
-  //       const res = await fetch(`${API_URL}/api/trips/active`, {
-  //         headers: { Authorization: `Bearer ${token}` },
-  //       });
-  //       if (!res.ok) return;
-  //       const data = await res.json();
-  //       if (!data?.id || !isMounted.current) return;
-  //       justRestoredRef.current = true;
-  //       setTimeout(() => { justRestoredRef.current = false; }, 3000);
-  //       currentTripIdRef.current = data.id;
-  //       setTripId(data.id);
-  //       setTripStatus(data.status as TripStatus);
-  //       if (data.driver_id) setDriverId(data.driver_id);
-  //       if (data.fare_amount != null) setFare(String(data.fare_amount));
-  //       if (data.pickup_address) setPickup(data.pickup_address);
-  //       if (data.dropoff_address) setDropoff(data.dropoff_address);
-  //       if (data.pickup_lat != null && data.pickup_lng != null)
-  //         setPickupCoords({ latitude: data.pickup_lat, longitude: data.pickup_lng });
-  //       if (data.dropoff_lat != null && data.dropoff_lng != null)
-  //         setDropoffCoords({ latitude: data.dropoff_lat, longitude: data.dropoff_lng });
-  //     } catch { /* non-fatal */ }
-  //   })();
-  // }, [user?.id]);
+  // ── Auto-cleanup stale pre-dispatch trips on mount (Fix 3) ──────────────
+  // When a previous session crashed or was killed mid-dispatch, the trip stays
+  // in 'requested' or 'dispatching' and blocks the next ride request with a 409.
+  // This effect silently cancels those stale trips so the user always starts clean.
+  // Trips in driver-assigned states (accepted/en_route/arrived/in_progress) are
+  // left alone — they represent real in-progress rides (handled by Cancel & Retry).
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        if (!token || !isMounted.current) return;
+        const res = await fetch(`${API_URL}/api/trips/any-pending`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok || !isMounted.current) return;
+        const pending = await res.json();
+        if (!pending?.id || !isMounted.current) return;
+        // Only silently cancel pre-dispatch stale trips (no driver yet).
+        // Driver-assigned trips are real bookings — leave them alone.
+        if (pending.status === 'requested' || pending.status === 'dispatching') {
+          await fetch(`${API_URL}/api/trips/${pending.id}/status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ status: 'cancelled' }),
+          });
+          console.log('[mount-cleanup] silently cancelled stale trip', pending.id, 'in status', pending.status);
+        }
+        // Trips in accepted/en_route/arrived/in_progress are handled by the
+        // Cancel & Retry flow if the user tries to request a new ride.
+      } catch { /* non-fatal — a failure here does not block the UI */ }
+    })();
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Trip Realtime subscription ────────────────────────────────────────
   useEffect(() => {
@@ -646,6 +645,9 @@ export default function HomeScreen() {
 
       // 409 = rider already has an active trip (stale from previous session or test)
       if (res.status === 409) {
+        // Release the in-flight guard before showing the dialog — otherwise tapping
+        // "Keep It" leaves requestInFlightRef=true and locks the Request button forever.
+        requestInFlightRef.current = false;
         setTripStatus('idle');
         Alert.alert(
           'Active Trip Found',
@@ -675,6 +677,9 @@ export default function HomeScreen() {
                     }
                   }
                 } catch { /* ignore — try again anyway */ }
+                // Small delay so the cancel write commits to the DB before the
+                // retry POST checks for active trips — avoids a 409 loop.
+                await new Promise(resolve => setTimeout(resolve, 500));
                 handleRequestRide();
               },
             },
