@@ -409,17 +409,19 @@ router.get('/any-pending', requireAuth, requireRider, async (req: AuthRequest, r
 // accidentally restores a stale pre-dispatch trip.
 //
 // Freshness guard: a trip is only considered "restorable" if it was created within the last
-// 2 hours. Test trips left in `accepted` state from a prior session must NOT ghost-resurrect on
-// boot. Any older live-status trip found here is auto-cancelled (fail safe to idle) so the
+// 10 minutes. Test trips left in `accepted` state from a prior session must NOT ghost-resurrect
+// on boot. Any older live-status trip found here is auto-cancelled (fail safe to idle) so the
 // rider app can never restore it again.
+//
+// Why 10 minutes: we share one test rider account across many devices during QA, so any window
+// long enough to cover a real ride (~30-60 min) is also long enough for device A's in-progress
+// trip to "ghost-resurrect" when device B reopens the app. A real user restarting mid-ride
+// within 10 min gets their trip back; anything older is treated as abandoned state.
 //
 // Must be declared BEFORE /:id so Express doesn't treat "active" as a UUID.
 router.get('/active', requireAuth, requireRider, async (req: AuthRequest, res) => {
   const LIVE_STATUSES = ['accepted', 'en_route', 'arrived', 'in_progress'];
-  // 2 hours — any trip older than this is stale regardless of status.
-  // A real ride completes in < 1 hour; anything older is leftover test data
-  // or a crashed session the user has no expectation of continuing.
-  const STALE_THRESHOLD_MS = 2 * 60 * 60 * 1000;
+  const STALE_THRESHOLD_MS = 10 * 60 * 1000;
   const staleBefore = new Date(Date.now() - STALE_THRESHOLD_MS).toISOString();
 
   // Fetch ALL live-status trips for this rider (not just fresh ones) so we can
@@ -483,14 +485,15 @@ router.get('/active', requireAuth, requireRider, async (req: AuthRequest, res) =
 // after an app restart mid-trip. Without this, a driver who relaunches the app mid-trip sees
 // the offline screen and cannot advance the trip — leaving the rider stranded.
 //
-// Freshness guard: only restore trips created within the last 2 hours. A live-status trip
+// Freshness guard: only restore trips created within the last 10 minutes. A live-status trip
 // older than that is leftover state from a prior test or crashed session — auto-cancel it
-// so the driver app never ghost-restores "on trip" mode at launch.
+// so the driver app never ghost-restores "on trip" mode at launch. Matches the rider-side
+// /active window so a shared test account cannot ghost a trip from one device to another.
 //
 // Must be declared BEFORE /:id so Express doesn't treat "driver-active" as a UUID.
 router.get('/driver-active', requireAuth, requireDriver, async (req: AuthRequest, res) => {
   const LIVE_STATUSES = ['accepted', 'en_route', 'arrived', 'in_progress'];
-  const STALE_THRESHOLD_MS = 2 * 60 * 60 * 1000;
+  const STALE_THRESHOLD_MS = 10 * 60 * 1000;
   const staleBefore = new Date(Date.now() - STALE_THRESHOLD_MS).toISOString();
 
   const { data: allActive, error } = await supabase
