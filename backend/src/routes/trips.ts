@@ -407,18 +407,26 @@ router.get('/any-pending', requireAuth, requireRider, async (req: AuthRequest, r
 // GET /api/trips/active — rider's live trip (driver already assigned), used to restore UI after
 // app restart. Only returns trips where a driver is actively involved so the client never
 // accidentally restores a stale pre-dispatch trip.
+//
+// Freshness guard: a trip is only considered "restorable" if it was created within the last
+// 2 hours. Test trips left in `accepted` state from a prior session must NOT ghost-resurrect on
+// boot. Any older live-status trip found here is auto-cancelled (fail safe to idle) so the
+// rider app can never restore it again.
+//
 // Must be declared BEFORE /:id so Express doesn't treat "active" as a UUID.
 router.get('/active', requireAuth, requireRider, async (req: AuthRequest, res) => {
   const LIVE_STATUSES = ['accepted', 'en_route', 'arrived', 'in_progress'];
+  // 2 hours — any trip older than this is stale regardless of status.
+  // A real ride completes in < 1 hour; anything older is leftover test data
+  // or a crashed session the user has no expectation of continuing.
+  const STALE_THRESHOLD_MS = 2 * 60 * 60 * 1000;
+  const staleBefore = new Date(Date.now() - STALE_THRESHOLD_MS).toISOString();
 
-  // Single query: fetch all live trips. Data integrity check (multiple active trips)
-  // is done inline — no second round-trip needed.
-  // The DB-level guard that prevents duplicates is:
-  //   CREATE UNIQUE INDEX one_active_trip_per_rider ON trips (rider_id)
-  //   WHERE status NOT IN ('completed','cancelled');
+  // Fetch ALL live-status trips for this rider (not just fresh ones) so we can
+  // distinguish "nothing to restore" from "stale trip needs cleanup".
   const { data: allActive, error } = await supabase
     .from('trips')
-    .select('id, driver_id, status, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, pickup_address, dropoff_address, fare_amount')
+    .select('id, driver_id, status, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, pickup_address, dropoff_address, fare_amount, created_at')
     .eq('rider_id', req.userId!)
     .in('status', LIVE_STATUSES)
     .order('created_at', { ascending: false });
@@ -432,30 +440,111 @@ router.get('/active', requireAuth, requireRider, async (req: AuthRequest, res) =
     console.error(`[trips/active] DATA INTEGRITY: rider ${req.userId} has ${allActive!.length} concurrent active trips — investigate immediately`);
   }
 
-  res.json(allActive?.[0] ?? null); // null = no active trip (not an error)
+  const rows = allActive ?? [];
+  const fresh = rows.filter(r => r.created_at && r.created_at >= staleBefore);
+  const stale = rows.filter(r => !r.created_at || r.created_at < staleBefore);
+
+  // Auto-cancel stale live-status trips so they never ghost-restore again.
+  // Fire-and-forget: even if this fails the client still gets `null` and falls
+  // to idle, which is the safe outcome.
+  if (stale.length > 0) {
+    console.warn(`[trips/active] auto-cancelling ${stale.length} stale trip(s) for rider ${req.userId}`);
+    for (const row of stale) {
+      supabase
+        .from('trips')
+        .update({ status: 'cancelled' })
+        .eq('id', row.id)
+        .then(({ error: cancelErr }) => {
+          if (cancelErr) console.error('[trips/active] auto-cancel failed:', cancelErr.message);
+          else recordStatusHistory(row.id, 'cancelled');
+        });
+    }
+  }
+
+  // Strict whitelist on the returned row — never leak a status the client
+  // can't handle, never leak a trip with missing pickup/dropoff coordinates.
+  const candidate = fresh[0];
+  if (!candidate) return res.json(null);
+  if (!LIVE_STATUSES.includes(candidate.status)) return res.json(null);
+  if (
+    typeof candidate.pickup_lat !== 'number' || !isFinite(candidate.pickup_lat) ||
+    typeof candidate.pickup_lng !== 'number' || !isFinite(candidate.pickup_lng) ||
+    typeof candidate.dropoff_lat !== 'number' || !isFinite(candidate.dropoff_lat) ||
+    typeof candidate.dropoff_lng !== 'number' || !isFinite(candidate.dropoff_lng)
+  ) {
+    console.warn(`[trips/active] candidate trip ${candidate.id} has invalid coords — not restoring`);
+    return res.json(null);
+  }
+
+  res.json(candidate);
 });
 
 // GET /api/trips/driver-active — driver's current assigned trip, used to restore the driver UI
 // after an app restart mid-trip. Without this, a driver who relaunches the app mid-trip sees
 // the offline screen and cannot advance the trip — leaving the rider stranded.
+//
+// Freshness guard: only restore trips created within the last 2 hours. A live-status trip
+// older than that is leftover state from a prior test or crashed session — auto-cancel it
+// so the driver app never ghost-restores "on trip" mode at launch.
+//
 // Must be declared BEFORE /:id so Express doesn't treat "driver-active" as a UUID.
 router.get('/driver-active', requireAuth, requireDriver, async (req: AuthRequest, res) => {
   const LIVE_STATUSES = ['accepted', 'en_route', 'arrived', 'in_progress'];
-  const { data, error } = await supabase
+  const STALE_THRESHOLD_MS = 2 * 60 * 60 * 1000;
+  const staleBefore = new Date(Date.now() - STALE_THRESHOLD_MS).toISOString();
+
+  const { data: allActive, error } = await supabase
     .from('trips')
-    .select('id, rider_id, status, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, pickup_address, dropoff_address, fare_amount')
+    .select('id, rider_id, status, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, pickup_address, dropoff_address, fare_amount, created_at')
     .eq('driver_id', req.userId!)
     .in('status', LIVE_STATUSES)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .order('created_at', { ascending: false });
 
   if (error) {
     console.error('[trips/driver-active] DB error:', error.message);
     return res.status(500).json({ error: 'Failed to fetch active trip' });
   }
 
-  res.json(data ?? null); // null = no active trip
+  const rows = allActive ?? [];
+  const fresh = rows.filter(r => r.created_at && r.created_at >= staleBefore);
+  const stale = rows.filter(r => !r.created_at || r.created_at < staleBefore);
+
+  if (stale.length > 0) {
+    console.warn(`[trips/driver-active] auto-cancelling ${stale.length} stale trip(s) for driver ${req.userId}`);
+    for (const row of stale) {
+      supabase
+        .from('trips')
+        .update({ status: 'cancelled' })
+        .eq('id', row.id)
+        .then(({ error: cancelErr }) => {
+          if (cancelErr) console.error('[trips/driver-active] auto-cancel failed:', cancelErr.message);
+          else recordStatusHistory(row.id, 'cancelled');
+        });
+    }
+    // Free the driver from any stale "on a trip" state so dispatch can resume.
+    supabase
+      .from('drivers')
+      .update({ is_available: true, became_available_at: new Date().toISOString() })
+      .eq('id', req.userId!)
+      .then(({ error: drvErr }) => {
+        if (drvErr) console.error('[trips/driver-active] driver reset failed:', drvErr.message);
+      });
+  }
+
+  const candidate = fresh[0];
+  if (!candidate) return res.json(null);
+  if (!LIVE_STATUSES.includes(candidate.status)) return res.json(null);
+  if (
+    typeof candidate.pickup_lat !== 'number' || !isFinite(candidate.pickup_lat) ||
+    typeof candidate.pickup_lng !== 'number' || !isFinite(candidate.pickup_lng) ||
+    typeof candidate.dropoff_lat !== 'number' || !isFinite(candidate.dropoff_lat) ||
+    typeof candidate.dropoff_lng !== 'number' || !isFinite(candidate.dropoff_lng)
+  ) {
+    console.warn(`[trips/driver-active] candidate trip ${candidate.id} has invalid coords — not restoring`);
+    return res.json(null);
+  }
+
+  res.json(candidate);
 });
 
 // GET /api/trips/:id — only rider or driver on the trip

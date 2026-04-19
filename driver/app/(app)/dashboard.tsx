@@ -275,7 +275,23 @@ export default function DashboardScreen() {
           setIsApproved(me.is_approved ?? false);
         }
 
-        if (activeTrip?.id) {
+        // Client-side policy (defence-in-depth; backend also enforces):
+        //   - Must have valid pickup/dropoff coords
+        //   - Status must be in the LIVE whitelist
+        // If any guard fails, do NOT restore — start offline so the dispatch
+        // engine can't send offers to a wedged driver UI.
+        const LIVE_STATUSES: TripStatus[] = ['accepted', 'en_route', 'arrived', 'in_progress'];
+        const hasValidCoords =
+          typeof activeTrip?.pickup_lat === 'number' && isFinite(activeTrip.pickup_lat) &&
+          typeof activeTrip?.pickup_lng === 'number' && isFinite(activeTrip.pickup_lng) &&
+          typeof activeTrip?.dropoff_lat === 'number' && isFinite(activeTrip.dropoff_lat) &&
+          typeof activeTrip?.dropoff_lng === 'number' && isFinite(activeTrip.dropoff_lng);
+        const isRestorable =
+          activeTrip?.id &&
+          LIVE_STATUSES.includes(activeTrip?.status) &&
+          hasValidCoords;
+
+        if (isRestorable) {
           // Live trip restore. Suppress the trip-update channel's subscribe()
           // catch-up fetch for 3 s so it doesn't race against this restore.
           justRestoredRef.current = true;

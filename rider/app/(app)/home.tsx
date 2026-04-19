@@ -311,13 +311,31 @@ export default function HomeScreen() {
         if (!token || !isMounted.current) return;
 
         // Step 1 — restore live trip if one exists.
+        // Client-side policy (defence-in-depth; backend also enforces):
+        //   - Must have a driver_id (a trip with no driver is pre-dispatch, not live)
+        //   - Status must be in the LIVE whitelist
+        //   - Pickup + dropoff coords must be finite numbers
+        // If any guard fails, we do NOT restore — we fall through to the "start idle"
+        // path. A blank home screen is always safer than a ghost "driver accepted" UI.
+        const LIVE_STATUSES: TripStatus[] = ['accepted', 'en_route', 'arrived', 'in_progress'];
         const activeRes = await fetch(`${API_URL}/api/trips/active`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!isMounted.current) return;
         if (activeRes.ok) {
           const active = await activeRes.json();
-          if (active?.id && isMounted.current) {
+          const hasValidCoords =
+            typeof active?.pickup_lat === 'number' && isFinite(active.pickup_lat) &&
+            typeof active?.pickup_lng === 'number' && isFinite(active.pickup_lng) &&
+            typeof active?.dropoff_lat === 'number' && isFinite(active.dropoff_lat) &&
+            typeof active?.dropoff_lng === 'number' && isFinite(active.dropoff_lng);
+          const isRestorable =
+            active?.id &&
+            active?.driver_id &&                         // pre-dispatch trips have no driver
+            LIVE_STATUSES.includes(active?.status) &&
+            hasValidCoords;
+
+          if (isRestorable && isMounted.current) {
             // Suppress the subscribe() catch-up fetch for 3 s so it can't race
             // against this restore and wipe the state we just populated.
             justRestoredRef.current = true;
@@ -328,23 +346,19 @@ export default function HomeScreen() {
             currentTripIdRef.current = active.id;
             setTripId(active.id);
             setTripStatus(active.status as TripStatus);
-            if (active.driver_id) setDriverId(active.driver_id);
+            setDriverId(active.driver_id);
 
-            // Coordinates — guard NaN/null from backend before passing to map.
-            if (typeof active.pickup_lat === 'number' && isFinite(active.pickup_lat) &&
-                typeof active.pickup_lng === 'number' && isFinite(active.pickup_lng)) {
-              setPickupCoords({ latitude: active.pickup_lat, longitude: active.pickup_lng });
-            }
-            if (typeof active.dropoff_lat === 'number' && isFinite(active.dropoff_lat) &&
-                typeof active.dropoff_lng === 'number' && isFinite(active.dropoff_lng)) {
-              setDropoffCoords({ latitude: active.dropoff_lat, longitude: active.dropoff_lng });
-            }
+            setPickupCoords({ latitude: active.pickup_lat, longitude: active.pickup_lng });
+            setDropoffCoords({ latitude: active.dropoff_lat, longitude: active.dropoff_lng });
             if (active.pickup_address)  setPickup(active.pickup_address);
             if (active.dropoff_address) setDropoff(active.dropoff_address);
             if (active.fare_amount != null) setFare(String(active.fare_amount));
             setSearchMode('confirmed');
             return; // Live trip restored — do not fall through to the cancel branch.
           }
+          // If the backend returned something non-null but it failed our guards,
+          // fall through: no restore, and the pre-dispatch branch below will
+          // clean up any stale requested/dispatching trip.
         }
 
         // Step 2 — no live trip. Check for a stale pre-dispatch trip.
