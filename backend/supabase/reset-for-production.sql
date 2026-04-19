@@ -55,6 +55,18 @@ DELETE FROM waitlist WHERE phone IN ('+962790000001', '+962790000002');
 COMMIT;
 
 -- =============================================================================
+-- ⚠️  DEV / TEST NOTE:
+--
+-- If you are running this in a development or test environment (not real
+-- production), the two test account profile rows above were just deleted.
+-- The apps will break if they reuse a cached session (JWT still valid but
+-- no profile row → "Account pending approval" / "Failed to create trip").
+--
+-- Fix: run backend/supabase/seed-test-accounts.sql immediately after this,
+-- then force-close and reopen both apps.  No re-login required.
+-- =============================================================================
+
+-- =============================================================================
 -- MANUAL STEP (required after running this SQL):
 --
 -- Delete the test Supabase Auth users manually:
