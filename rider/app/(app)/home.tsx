@@ -8,6 +8,7 @@ import {
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import PolylineDecoder from '@mapbox/polyline';
 import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
 import { DARK_MAP_STYLE } from '../../lib/mapStyle';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -296,6 +297,34 @@ export default function HomeScreen() {
         });
         if (res.ok && isMounted.current) setRiderProfile(await res.json());
       } catch { /* non-fatal */ }
+    })();
+  }, [user?.id]);
+
+  // ── Register Expo push token so the backend can alert this rider ─────────────
+  // Token is stored in the DB. The backend uses it to send "Driver Confirmed"
+  // and "Trip Cancelled" push notifications when the app is backgrounded.
+  // Non-fatal: Realtime is always the fallback for foreground status updates.
+  useEffect(() => {
+    if (!user?.id) return;
+    (async () => {
+      try {
+        const { status } = await Notifications.requestPermissionsAsync();
+        if (status !== 'granted') return;
+        // getExpoPushTokenAsync works in Expo Go without a projectId.
+        // Standalone builds may need: { projectId: Constants.expoConfig?.extra?.eas?.projectId }
+        const tokenData = await Notifications.getExpoPushTokenAsync().catch(() => null);
+        if (!tokenData?.data || !isMounted.current) return;
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        if (!token || !isMounted.current) return;
+        await fetch(`${API_URL}/api/riders/push-token`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ token: tokenData.data }),
+        });
+      } catch (e) {
+        console.warn('[push] rider token registration failed:', e);
+      }
     })();
   }, [user?.id]);
 

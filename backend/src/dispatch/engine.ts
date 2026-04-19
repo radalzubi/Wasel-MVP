@@ -65,12 +65,8 @@ export async function dispatchTrip(
 
   const alreadyOffered = new Set((previousOffers || []).map((o) => o.driver_id));
 
-  // Re-query live availability every round so driver status is fresh
-  // Select plain float columns for coordinates: Supabase REST returns PostGIS
-  // geometry (current_location) as a WKB hex string, not as a GeoJSON object,
-  // so we cannot use `.coordinates` on it directly.  The location_lat/location_lng
-  // plain columns are maintained alongside the geometry column by the PATCH
-  // /api/drivers/location endpoint and are always safe to use in JS arithmetic.
+  // Re-query live availability every round so driver status is fresh.
+  // location_lat / location_lng are plain float columns — always safe for JS arithmetic.
   const { data: drivers, error } = await supabase
     .from('drivers')
     .select('id, location_lat, location_lng, subscription_tier, activity_score, became_available_at')

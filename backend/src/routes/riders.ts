@@ -5,9 +5,9 @@ import { requireAuth, requireRider, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
-// GET /api/riders/me — returns the authenticated rider's profile
-// Explicit column list: excludes internal fields (waitlist_position, etc.)
-// that have no client-facing purpose.
+// GET /api/riders/me — returns the authenticated rider's profile.
+// Explicit column list: includes waitlist fields (used by the profile screen)
+// but excludes any internal-only fields not needed by the client.
 router.get('/me', requireAuth, requireRider, async (req: AuthRequest, res) => {
   const { data, error } = await supabase
     .from('riders')
@@ -24,7 +24,9 @@ router.get('/me', requireAuth, requireRider, async (req: AuthRequest, res) => {
 // PATCH /api/riders/push-token — register or refresh Expo push token
 router.patch('/push-token', requireAuth, requireRider, async (req: AuthRequest, res) => {
   const PushTokenSchema = z.object({
-    token: z.string().min(1),
+    // Expo push tokens are ~100 chars; 500 is generous but guards against
+    // arbitrarily large payloads being stored in the push_token column.
+    token: z.string().min(1).max(500),
   });
   const parsed = PushTokenSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });

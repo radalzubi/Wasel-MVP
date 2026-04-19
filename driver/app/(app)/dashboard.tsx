@@ -249,6 +249,35 @@ export default function DashboardScreen() {
     return () => { pulseLoopRef.current?.stop(); };
   }, [offerTimer, offer]);
 
+  // ── Register Expo push token so the backend can alert this driver ────────────
+  // Token is stored in the DB. The backend's sendPush() calls use it to deliver
+  // "New Ride Request" notifications when the app is backgrounded.
+  // Only runs when the driver is authenticated AND approved — unapproved drivers
+  // get no offers, so registering their token early is pointless.
+  // Non-fatal: Realtime is always the fallback for foreground offer delivery.
+  useEffect(() => {
+    if (!user?.id || !isApproved) return;
+    (async () => {
+      try {
+        const { status } = await Notifications.requestPermissionsAsync();
+        if (status !== 'granted') return;
+        // getExpoPushTokenAsync works in Expo Go without a projectId.
+        // Standalone builds may need: { projectId: Constants.expoConfig?.extra?.eas?.projectId }
+        const tokenData = await Notifications.getExpoPushTokenAsync().catch(() => null);
+        if (!tokenData?.data || !isMounted.current) return;
+        const token = await getToken();
+        if (!token || !isMounted.current) return;
+        await fetch(`${API_URL}/api/drivers/push-token`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ token: tokenData.data }),
+        });
+      } catch (e) {
+        console.warn('[push] driver token registration failed:', e);
+      }
+    })();
+  }, [user?.id, isApproved, getToken]);
+
   // ── Driver bootstrap: profile fetch + active-trip restore ────────────────
   //
   // Coherent policy (mirror image of rider-side bootstrap in home.tsx):
@@ -665,6 +694,15 @@ export default function DashboardScreen() {
   async function toggleOnline(value: boolean) {
     const prev = isOnline;
     setIsOnline(value);
+
+    // Going offline: dismiss any pending offer immediately so the driver
+    // cannot accept a trip they are about to stop servicing. The offer will
+    // expire naturally on the backend; no need to decline it explicitly.
+    if (!value) {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+      setOffer(null);
+    }
+
     try {
       const token = await getToken();
       if (!token) { if (isMounted.current) setIsOnline(prev); return; }

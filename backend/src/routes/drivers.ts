@@ -82,7 +82,9 @@ router.get('/me', requireAuth, requireDriver, async (req: AuthRequest, res) => {
 // PATCH /api/drivers/push-token — register or refresh Expo push token
 router.patch('/push-token', requireAuth, requireDriver, async (req: AuthRequest, res) => {
   const PushTokenSchema = z.object({
-    token: z.string().min(1),
+    // Expo push tokens are ~100 chars; 500 is generous but guards against
+    // arbitrarily large payloads being stored in the push_token column.
+    token: z.string().min(1).max(500),
   });
   const parsed = PushTokenSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
