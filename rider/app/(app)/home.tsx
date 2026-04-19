@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   ActivityIndicator, Alert, Keyboard, Platform,
   Modal, KeyboardAvoidingView, ScrollView, Linking,
+  AppState, AppStateStatus,
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import PolylineDecoder from '@mapbox/polyline';
@@ -117,6 +118,8 @@ export default function HomeScreen() {
 
   // Prevents setState after unmount (crash fix)
   const isMounted = useRef(true);
+  // Tracks the previous AppState so we can detect foreground resumption.
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
 
   const { destName, destLat, destLng } = useLocalSearchParams<{
     destName?: string;
@@ -131,6 +134,34 @@ export default function HomeScreen() {
 
   // Cleanup: mark unmounted so in-flight async callbacks skip setState
   useEffect(() => () => { isMounted.current = false; }, []);
+
+  // ── AppState: reconnect Supabase Realtime on foreground resume ────────────
+  // On real devices, backgrounding the app drops the WebSocket. Without this,
+  // if the rider is mid-trip and resumes the app, the trip subscription silently
+  // stops firing and the UI freezes on the last known status.
+  useEffect(() => {
+    const handleAppStateChange = (nextState: AppStateStatus) => {
+      const prev = appStateRef.current;
+      appStateRef.current = nextState;
+      if (
+        (prev === 'background' || prev === 'inactive') &&
+        nextState === 'active'
+      ) {
+        try {
+          const rt = (supabase as unknown as {
+            realtime: { isConnected: () => boolean; connect: () => void };
+          }).realtime;
+          if (!rt.isConnected()) {
+            rt.connect();
+          }
+        } catch (e) {
+          console.warn('[appstate] realtime reconnect failed:', e);
+        }
+      }
+    };
+    const sub = AppState.addEventListener('change', handleAppStateChange);
+    return () => sub.remove();
+  }, []);
 
   // Sign-out guard: when the user signs out, tear down all Realtime channels
   // and clear trip state. Without this, channels subscribed to the previous
@@ -160,7 +191,11 @@ export default function HomeScreen() {
       const paramsKey = `${destName}|${destLat}|${destLng}`;
       if (lastAppliedExploreRef.current === paramsKey) return;
       lastAppliedExploreRef.current = paramsKey;
-      const coords = { latitude: parseFloat(destLat as string), longitude: parseFloat(destLng as string) };
+      const parsedLat = parseFloat(destLat as string);
+      const parsedLng = parseFloat(destLng as string);
+      // Guard against NaN from malformed route params — NaN passed to MapView crashes on iOS
+      if (!isFinite(parsedLat) || !isFinite(parsedLng)) return;
+      const coords = { latitude: parsedLat, longitude: parsedLng };
       const label = destName as string;
       setDropoff(label);
       setDropoffCoords(coords);
@@ -305,8 +340,22 @@ export default function HomeScreen() {
     // Sync the ref so async callbacks spawned by this effect can detect
     // whether the trip was reset while they were awaiting.
     currentTripIdRef.current = tripId;
+
+    // Deduplication guard: tear down any pre-existing channel for this trip
+    // before creating a new one. On real devices, effect cleanup sometimes
+    // races with the new effect (fast remount / React Strict Mode), which can
+    // leave two subscriptions for the same trip alive simultaneously. Both would
+    // fire on every CDC event, causing duplicate state updates and double alerts.
+    const tripChannelName = `trip-${tripId}`;
+    const existingTrip = supabase.getChannels().find(
+      c => c.topic === tripChannelName || c.topic === `realtime:${tripChannelName}`,
+    );
+    if (existingTrip) {
+      try { supabase.removeChannel(existingTrip); } catch { /* ignore */ }
+    }
+
     const ch = supabase
-      .channel(`trip-${tripId}`)
+      .channel(tripChannelName)
       .on('postgres_changes', {
         event: 'UPDATE', schema: 'public', table: 'trips',
         filter: `id=eq.${tripId}`,
@@ -387,15 +436,27 @@ export default function HomeScreen() {
           console.error('[trip-sub] subscribe fetch error:', err);
         }
       });
-    return () => { supabase.removeChannel(ch); };
+    return () => {
+      try { supabase.removeChannel(ch); } catch { /* ignore — channel may already be gone */ }
+    };
   }, [tripId]);
 
   // ── Live driver location subscription ────────────────────────────────
   useEffect(() => {
     if (!driverId) return;
     if (['idle', 'searching', 'completed', 'cancelled'].includes(tripStatus)) return;
+
+    // Deduplication: remove any stale channel for this driver before creating a new one
+    const driverLocChannelName = `driver-loc-${driverId}`;
+    const existingDriverLoc = supabase.getChannels().find(
+      c => c.topic === driverLocChannelName || c.topic === `realtime:${driverLocChannelName}`,
+    );
+    if (existingDriverLoc) {
+      try { supabase.removeChannel(existingDriverLoc); } catch { /* ignore */ }
+    }
+
     const ch = supabase
-      .channel(`driver-loc-${driverId}`)
+      .channel(driverLocChannelName)
       .on('postgres_changes', {
         event: 'UPDATE', schema: 'public', table: 'drivers',
         filter: `id=eq.${driverId}`,
@@ -406,7 +467,10 @@ export default function HomeScreen() {
           if (currentTripIdRef.current === null) return;
           const lat = payload.new.location_lat as number | null;
           const lng = payload.new.location_lng as number | null;
-          if (lat != null && lng != null) setDriverLocation({ latitude: lat, longitude: lng });
+          // Validate coordinates: NaN/Infinity from GPS transition would crash MapView
+          if (lat != null && lng != null && isFinite(lat) && isFinite(lng)) {
+            setDriverLocation({ latitude: lat, longitude: lng });
+          }
         } catch (err) {
           console.error('[driver-loc-sub] payload error:', err);
         }
@@ -422,14 +486,20 @@ export default function HomeScreen() {
           // Verify the trip is still active after the async DB fetch resolves
           if (currentTripIdRef.current !== capturedTripId) return;
           if (!isMounted.current) return;
-          if (data?.location_lat != null && data?.location_lng != null) {
+          // Validate coordinates before setting state — invalid coords crash MapView
+          if (
+            data?.location_lat != null && data?.location_lng != null &&
+            isFinite(data.location_lat) && isFinite(data.location_lng)
+          ) {
             setDriverLocation({ latitude: data.location_lat, longitude: data.location_lng });
           }
         } catch (err) {
           console.error('[driver-loc-sub] subscribe fetch error:', err);
         }
       });
-    return () => { supabase.removeChannel(ch); };
+    return () => {
+      try { supabase.removeChannel(ch); } catch { /* ignore — channel may already be gone */ }
+    };
   }, [driverId, tripStatus]);
 
   // ── Fetch driver name, phone, and vehicle when driverId becomes known ───
@@ -550,7 +620,11 @@ export default function HomeScreen() {
   }
 
   function handleSelectSuggestion(place: PlaceSuggestion) {
-    const coords = { latitude: parseFloat(place.lat), longitude: parseFloat(place.lon) };
+    const parsedLat = parseFloat(place.lat);
+    const parsedLon = parseFloat(place.lon);
+    // Guard: Nominatim can return empty/invalid coordinates — NaN crashes MapView
+    if (!isFinite(parsedLat) || !isFinite(parsedLon)) return;
+    const coords = { latitude: parsedLat, longitude: parsedLon };
     const parts = place.display_name.split(', ');
     const label = parts.slice(0, 3).join(', ');
 

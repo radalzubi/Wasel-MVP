@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   Switch, Alert, Vibration, Platform, Modal, Animated, Linking, ScrollView,
+  AppState, AppStateStatus,
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
@@ -138,6 +139,8 @@ export default function DashboardScreen() {
   const locationRef = useRef<LatLng | null>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const pulseLoopRef = useRef<Animated.CompositeAnimation | null>(null);
+  // Tracks the previous AppState so we can detect foreground resumption.
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
 
   // Mark unmounted so async callbacks can bail out safely.
   // Also set up the Android notification channel on first mount.
@@ -175,6 +178,40 @@ export default function DashboardScreen() {
       setIsOnline(false);
     }
   }, [user]);
+
+  // ── AppState: reconnect Supabase Realtime on foreground resume ───────────────
+  // On real devices, the app going to background causes the WebSocket connection
+  // to drop. Without reconnection, the driver never receives new trip offers after
+  // the device screen turns off and back on, and the active-trip subscription goes
+  // silent — the UI freezes on the last known status.
+  useEffect(() => {
+    const handleAppStateChange = (nextState: AppStateStatus) => {
+      const prev = appStateRef.current;
+      appStateRef.current = nextState;
+      // Reconnect when transitioning from background/inactive → active
+      if (
+        (prev === 'background' || prev === 'inactive') &&
+        nextState === 'active'
+      ) {
+        try {
+          // supabase.realtime is the RealtimeClient instance.
+          // Call connect() only when disconnected — it is idempotent when
+          // isConnecting() or isConnected(), so the guard prevents double calls.
+          const rt = (supabase as unknown as {
+            realtime: { isConnected: () => boolean; connect: () => void };
+          }).realtime;
+          if (!rt.isConnected()) {
+            rt.connect();
+          }
+        } catch (e) {
+          console.warn('[appstate] realtime reconnect failed:', e);
+        }
+      }
+    };
+
+    const sub = AppState.addEventListener('change', handleAppStateChange);
+    return () => sub.remove();
+  }, []);
 
   // Keep currentTripRef in sync so the offer handler can check it synchronously
   // without depending on stale closure values.
@@ -317,15 +354,23 @@ export default function DashboardScreen() {
             distanceInterval: 30,
           },
           async (loc) => {
-            if (cancelled) return;
+            // Guard: bail out immediately if effect was cleaned up or component
+            // unmounted — this callback fires from a native thread and can arrive
+            // after cleanup on real devices (background/foreground cycle).
+            if (cancelled || !isMounted.current) return;
+
+            // Validate coordinates before using them — GPS can return NaN/Infinity
+            // on some devices when the fix is transitioning.
             const { latitude: lat, longitude: lng } = loc.coords;
+            if (!isFinite(lat) || !isFinite(lng)) return;
+
             setLocation({ latitude: lat, longitude: lng });
 
             try {
               const session = await supabase.auth.getSession();
               // Re-check after the async getSession() call — the user may have
               // signed out or the effect may have been cleaned up while waiting.
-              if (cancelled) return;
+              if (cancelled || !isMounted.current) return;
               const token = session.data.session?.access_token;
               if (!token) return;
               await fetch(`${API_URL}/api/drivers/location`, {
@@ -493,7 +538,9 @@ export default function DashboardScreen() {
         } catch { /* guard against malformed payload */ }
       })
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      try { supabase.removeChannel(channel); } catch { /* ignore — channel may already be gone */ }
+    };
   }, [currentTrip?.id]);
 
   // ── Realtime: incoming trip offers ───────────────────────────────────────
@@ -503,8 +550,21 @@ export default function DashboardScreen() {
   useEffect(() => {
     if (!user?.id) return;
     const userId = user.id; // stable local copy for the closure
+
+    // Deduplication guard: remove any existing channel with this name before
+    // creating a new one. On real devices, effect cleanup sometimes races with
+    // the new effect (fast remount), leaving two subscriptions alive and causing
+    // duplicate offer modals and double-state mutations.
+    const offersChannelName = `driver-offers-${userId}`;
+    const existingOffers = supabase.getChannels().find(
+      c => c.topic === offersChannelName || c.topic === `realtime:${offersChannelName}`,
+    );
+    if (existingOffers) {
+      try { supabase.removeChannel(existingOffers); } catch { /* ignore */ }
+    }
+
     const channel = supabase
-      .channel(`driver-offers-${userId}`)
+      .channel(offersChannelName)
       .on('postgres_changes', {
         event: 'INSERT', schema: 'public', table: 'trip_offers',
         filter: `driver_id=eq.${userId}`,
@@ -526,7 +586,17 @@ export default function DashboardScreen() {
             if (!trip || !isMounted.current || currentTripRef.current) return;
 
             try {
-              Vibration.vibrate(Platform.OS === 'android' ? [0, 400, 200, 400] : 400);
+              // iOS only supports a single vibration pulse (ignores duration/pattern).
+              // Android supports vibration patterns. Both wrapped in try/catch because
+              // vibration can throw on devices without a vibrator or in silent mode.
+              if (Platform.OS === 'android') {
+                Vibration.vibrate([0, 400, 200, 400]);
+              } else {
+                // On iOS, Vibration.vibrate() ignores the argument — just call it.
+                // Do NOT pass an array on iOS — it causes an unhandled rejection crash
+                // on some iOS versions due to a React Native bridge type mismatch.
+                Vibration.vibrate();
+              }
             } catch { /* vibration unavailable on some devices */ }
 
             const distKm =
@@ -552,7 +622,9 @@ export default function DashboardScreen() {
         })();
       })
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      try { supabase.removeChannel(channel); } catch { /* ignore — channel may already be gone */ }
+    };
   }, [user?.id]);
 
   // ── Offer countdown timer ─────────────────────────────────────────────────
