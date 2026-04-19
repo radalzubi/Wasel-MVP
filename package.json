@@ -1,7 +1,20 @@
 {
   "name": "wasel-mvp",
   "private": true,
+  "workspaces": [
+    "packages/*",
+    "rider",
+    "driver"
+  ],
+  "scripts": {
+    "rider": "npm start --workspace=rider",
+    "driver": "npm start --workspace=driver",
+    "backend:dev": "npm --prefix backend run dev",
+    "backend:build": "npm --prefix backend run build"
+  },
   "devDependencies": {
-    "supabase": "^2.92.0"
+    "@types/react": "~19.1.0",
+    "supabase": "^2.92.0",
+    "typescript": "~5.9.2"
   }
 }

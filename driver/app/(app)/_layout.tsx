@@ -2,7 +2,7 @@ import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ErrorBoundary } from '../../components/ErrorBoundary';
+import { ErrorBoundary } from '@wasel/shared';
 
 export default function AppLayout() {
   const { t } = useLanguage();

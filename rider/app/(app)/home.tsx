@@ -8,7 +8,7 @@ import {
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import PolylineDecoder from '@mapbox/polyline';
 import * as Location from 'expo-location';
-import { DARK_MAP_STYLE } from '../../lib/mapStyle';
+import { DARK_MAP_STYLE, haversineKm } from '@wasel/shared';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
@@ -26,16 +26,6 @@ const JORDAN = { minLat: 29.1, maxLat: 33.4, minLng: 34.9, maxLng: 39.3 };
 function inJordan(lat: number, lng: number) {
   return lat >= JORDAN.minLat && lat <= JORDAN.maxLat &&
     lng >= JORDAN.minLng && lng <= JORDAN.maxLng;
-}
-
-function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a = Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) *
-    Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 type TripStatus =

@@ -2,6 +2,8 @@ import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 
 // Show notifications as alerts while the app is foregrounded.
+// Module-level call so every app that imports @wasel/shared gets the behavior
+// without each one having to remember to set the handler.
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -14,12 +16,19 @@ Notifications.setNotificationHandler({
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
+type Role = 'rider' | 'driver';
+
 /**
- * Requests notification permission and registers the Expo push token
- * with the backend. Call once after the user is signed in.
- * Safe to call multiple times — silently no-ops if permission is denied.
+ * Requests notification permission and registers the Expo push token with
+ * the backend. Call once after the user is signed in.
+ *
+ * Safe to call multiple times — silently no-ops if permission is denied
+ * or if the Expo projectId is missing (standalone builds only).
+ *
+ * @param role     Which backend endpoint to register with
+ * @param accessToken Supabase session access token
  */
-export async function registerPushToken(accessToken: string): Promise<void> {
+export async function registerPushToken(role: Role, accessToken: string): Promise<void> {
   try {
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
@@ -42,7 +51,7 @@ export async function registerPushToken(accessToken: string): Promise<void> {
 
     const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
 
-    await fetch(`${API_URL}/api/riders/push-token`, {
+    await fetch(`${API_URL}/api/${role}s/push-token`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',

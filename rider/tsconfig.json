@@ -1,7 +1,12 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
+    "strict": true,
+    "baseUrl": ".",
+    "paths": {
+      "@wasel/shared": ["../packages/shared/src/index.ts"],
+      "@wasel/shared/*": ["../packages/shared/src/*"]
+    }
   },
   "include": [
     "**/*.ts",
