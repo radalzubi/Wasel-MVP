@@ -283,50 +283,60 @@ export default function DashboardScreen() {
     let cancelled = false;
 
     (async () => {
-      // Request foreground permission first (required on iOS before background).
-      const { status: fgStatus } = await Location.requestForegroundPermissionsAsync();
-      if (fgStatus !== 'granted') {
-        console.warn('[location] foreground permission denied');
-        return;
-      }
+      try {
+        // Request foreground permission first (required on iOS before background).
+        const { status: fgStatus } = await Location.requestForegroundPermissionsAsync();
+        if (fgStatus !== 'granted') {
+          console.warn('[location] foreground permission denied');
+          return;
+        }
 
-      // Request background permission ("Always Allow" on iOS, foreground service on Android).
-      await Location.requestBackgroundPermissionsAsync();
-      // Don't abort if denied — degraded foreground-only mode is still functional.
+        // Request background permission ("Always Allow" on iOS, foreground service on Android).
+        // Wrapped in its own try-catch: Expo Go on iOS throws an unhandled rejection here
+        // because NSLocationAlwaysAndWhenInUseUsageDescription is absent from Expo Go's
+        // Info.plist. The error is non-fatal — fall through to foreground-only mode.
+        try {
+          await Location.requestBackgroundPermissionsAsync();
+        } catch (bgErr) {
+          console.warn('[location] background permission unavailable (foreground-only mode):', bgErr);
+        }
 
-      if (cancelled) return;
+        if (cancelled) return;
 
-      subscription = await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.Balanced,
-          timeInterval: 10_000,
-          distanceInterval: 30,
-        },
-        async (loc) => {
-          if (cancelled) return;
-          const { latitude: lat, longitude: lng } = loc.coords;
-          setLocation({ latitude: lat, longitude: lng });
-
-          try {
-            const session = await supabase.auth.getSession();
-            // Re-check after the async getSession() call — the user may have
-            // signed out or the effect may have been cleaned up while waiting.
+        subscription = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.Balanced,
+            timeInterval: 10_000,
+            distanceInterval: 30,
+          },
+          async (loc) => {
             if (cancelled) return;
-            const token = session.data.session?.access_token;
-            if (!token) return;
-            await fetch(`${API_URL}/api/drivers/location`, {
-              method: 'PATCH',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify({ lat, lng }),
-            });
-          } catch (err) {
-            console.warn('[location] PATCH failed:', err);
-          }
-        },
-      );
+            const { latitude: lat, longitude: lng } = loc.coords;
+            setLocation({ latitude: lat, longitude: lng });
+
+            try {
+              const session = await supabase.auth.getSession();
+              // Re-check after the async getSession() call — the user may have
+              // signed out or the effect may have been cleaned up while waiting.
+              if (cancelled) return;
+              const token = session.data.session?.access_token;
+              if (!token) return;
+              await fetch(`${API_URL}/api/drivers/location`, {
+                method: 'PATCH',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ lat, lng }),
+              });
+            } catch (err) {
+              console.warn('[location] PATCH failed:', err);
+            }
+          },
+        );
+      } catch (err) {
+        console.warn('[location] setup failed:', err);
+      }
     })();
 
     return () => {

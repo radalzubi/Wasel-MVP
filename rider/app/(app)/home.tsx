@@ -346,18 +346,23 @@ export default function HomeScreen() {
           // Capture the tripId this subscription was created for so we can detect
           // if resetTripState() ran while we were waiting (currentTripIdRef → null).
           const capturedTripId = tripId;
-          const { data: { session } } = await supabase.auth.getSession();
-          const token = session?.access_token;
-          if (!token || !isMounted.current) return;
-          // If the trip was cancelled/reset while we were awaiting getSession,
+          if (!isMounted.current) return;
+          // If the trip was cancelled/reset while we were awaiting anything,
           // currentTripIdRef will be null — bail out to avoid re-activating trip UI.
           if (currentTripIdRef.current !== capturedTripId) return;
-          const res = await fetch(`${API_URL}/api/trips/${capturedTripId}`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          if (!res.ok || !isMounted.current) return;
+
+          // Query Supabase directly instead of going through the Railway backend —
+          // this cuts the roundtrip from ~400ms to ~50ms and avoids the JWT
+          // fetch + HTTP hop entirely.
+          const { data, error } = await supabase
+            .from('trips')
+            .select('id, status, driver_id')
+            .eq('id', capturedTripId)
+            .single();
+
+          if (error || !data || !isMounted.current) return;
           if (currentTripIdRef.current !== capturedTripId) return;
-          const data = await res.json();
+
           if (!data.status || data.status === 'requested') {
             // 'requested' or missing: dispatch is still pending, no state update needed
           } else if (data.status === 'cancelled') {
