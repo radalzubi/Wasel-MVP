@@ -229,30 +229,31 @@ export default function DashboardScreen() {
     })();
   }, [user, getToken]);
 
-  // ── Restore active trip on mount (handles driver app restarts mid-trip) ──
-  // Without this, a driver who kills and relaunches the app mid-trip sees the
-  // offline screen with no active trip, leaving the rider permanently stranded.
-  useEffect(() => {
-    if (!user) return;
-    (async () => {
-      try {
-        const token = await getToken();
-        if (!token) return;
-        const res = await fetch(`${API_URL}/api/trips/driver-active`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok || !isMounted.current) return;
-        const data = await res.json();
-        if (!data?.id) return;
-        // Block catchup CDC events for 3s so a replayed 'cancelled' event
-        // from while the app was offline doesn't wipe the just-restored trip.
-        justRestoredRef.current = true;
-        setTimeout(() => { justRestoredRef.current = false; }, 3000);
-        setIsOnline(true);
-        setCurrentTrip({ id: data.id, status: data.status as TripStatus });
-      } catch { /* non-fatal: don't block the dashboard */ }
-    })();
-  }, [user, getToken]);
+  // ── Trip restore disabled for MVP testing ────────────────────────────────
+  // Re-enable the block below for production so drivers who restart mid-trip
+  // can continue without leaving the rider stranded.
+  // During testing we want a clean idle state on every app open so stale
+  // test data from previous sessions never bleeds through.
+  //
+  // useEffect(() => {
+  //   if (!user) return;
+  //   (async () => {
+  //     try {
+  //       const token = await getToken();
+  //       if (!token) return;
+  //       const res = await fetch(`${API_URL}/api/trips/driver-active`, {
+  //         headers: { Authorization: `Bearer ${token}` },
+  //       });
+  //       if (!res.ok || !isMounted.current) return;
+  //       const data = await res.json();
+  //       if (!data?.id) return;
+  //       justRestoredRef.current = true;
+  //       setTimeout(() => { justRestoredRef.current = false; }, 3000);
+  //       setIsOnline(true);
+  //       setCurrentTrip({ id: data.id, status: data.status as TripStatus });
+  //     } catch { /* non-fatal */ }
+  //   })();
+  // }, [user, getToken]);
 
   // ── Initial location on mount ─────────────────────────────────────────────
   useEffect(() => {
@@ -661,17 +662,35 @@ export default function DashboardScreen() {
       // calls — calling Alert.alert after the JS context is being torn down
       // causes a native bridge null-pointer crash on Android.
       if (!isMounted.current) return;
+
       const msg = err instanceof Error ? err.message : 'Please try again.';
-      Alert.alert('Status update failed', msg);
-      // If cancel failed (network error, server error, no session), restore
-      // the trip UI so the driver can retry. Without this the driver's screen
-      // shows no active trip while the rider still has a live booking.
+
       if (nextStatus === 'cancelled') {
+        // If the backend says the trip is already in a terminal state, the trip
+        // is gone regardless — silently accept it and stay cleared.
+        // This prevents the "Cannot transition from 'cancelled' to 'cancelled'"
+        // infinite loop where the catch block kept restoring a dead trip to screen.
+        const alreadyTerminal =
+          msg.includes("Cannot transition from 'cancelled'") ||
+          msg.includes("Cannot transition from 'completed'") ||
+          msg.includes('Trip not found');
+
+        if (alreadyTerminal) {
+          // Trip is already done. driverCancelledRef was set true before the call,
+          // reset it after the CDC window so future rider-cancels alert correctly.
+          setTimeout(() => { driverCancelledRef.current = false; }, 4000);
+          return; // UI already cleared optimistically — nothing more to do
+        }
+
+        // Real failure (network error, auth, server error) — restore the trip
+        // panel so the driver can see the booking and retry the cancel.
         driverCancelledRef.current = false;
         setCurrentTrip(savedTrip);
         setRiderInfo(savedRiderInfo);
         setTripDetails(savedTripDetails);
       }
+
+      Alert.alert('Status update failed', msg);
     }
   }
 

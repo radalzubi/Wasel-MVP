@@ -259,46 +259,41 @@ export default function HomeScreen() {
     })();
   }, [user?.id]);
 
-  // ── Restore active trip on mount (handles app restarts mid-trip) ─────
-  // The /active endpoint only returns trips in accepted/en_route/arrived/in_progress,
-  // so anything returned here has an assigned driver and is safe to restore directly.
-  // Stale requested/dispatching trips are never returned — the rider will hit a 409
-  // on their next request which shows the "Cancel & Retry" dialog.
-  useEffect(() => {
-    if (!user) return;
-    (async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const token = session?.access_token;
-        if (!token || !isMounted.current) return;
-        const res = await fetch(`${API_URL}/api/trips/active`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!data?.id) return;
-
-        if (!isMounted.current) return;
-        // Flag: block the subscribe() catch-up fetch for 3s so it doesn't
-        // race against the state we're about to set from the restore fetch.
-        justRestoredRef.current = true;
-        setTimeout(() => { justRestoredRef.current = false; }, 3000);
-        // Keep the stale-callback guard in sync so any subscribe() callback that
-        // fires immediately after restore sees the correct tripId.
-        currentTripIdRef.current = data.id;
-        setTripId(data.id);
-        setTripStatus(data.status as TripStatus);
-        if (data.driver_id) setDriverId(data.driver_id);
-        if (data.fare_amount != null) setFare(String(data.fare_amount));
-        if (data.pickup_address) setPickup(data.pickup_address);
-        if (data.dropoff_address) setDropoff(data.dropoff_address);
-        if (data.pickup_lat != null && data.pickup_lng != null)
-          setPickupCoords({ latitude: data.pickup_lat, longitude: data.pickup_lng });
-        if (data.dropoff_lat != null && data.dropoff_lng != null)
-          setDropoffCoords({ latitude: data.dropoff_lat, longitude: data.dropoff_lng });
-      } catch { /* non-fatal: don't block the home screen */ }
-    })();
-  }, [user?.id]);
+  // ── Trip restore disabled for MVP testing ────────────────────────────────
+  // Re-enable the block below for production so riders who restart mid-trip
+  // are taken back to their active booking automatically.
+  // During testing we want a clean idle state on every app open so stale
+  // test data from previous sessions never bleeds through.
+  //
+  // useEffect(() => {
+  //   if (!user) return;
+  //   (async () => {
+  //     try {
+  //       const { data: { session } } = await supabase.auth.getSession();
+  //       const token = session?.access_token;
+  //       if (!token || !isMounted.current) return;
+  //       const res = await fetch(`${API_URL}/api/trips/active`, {
+  //         headers: { Authorization: `Bearer ${token}` },
+  //       });
+  //       if (!res.ok) return;
+  //       const data = await res.json();
+  //       if (!data?.id || !isMounted.current) return;
+  //       justRestoredRef.current = true;
+  //       setTimeout(() => { justRestoredRef.current = false; }, 3000);
+  //       currentTripIdRef.current = data.id;
+  //       setTripId(data.id);
+  //       setTripStatus(data.status as TripStatus);
+  //       if (data.driver_id) setDriverId(data.driver_id);
+  //       if (data.fare_amount != null) setFare(String(data.fare_amount));
+  //       if (data.pickup_address) setPickup(data.pickup_address);
+  //       if (data.dropoff_address) setDropoff(data.dropoff_address);
+  //       if (data.pickup_lat != null && data.pickup_lng != null)
+  //         setPickupCoords({ latitude: data.pickup_lat, longitude: data.pickup_lng });
+  //       if (data.dropoff_lat != null && data.dropoff_lng != null)
+  //         setDropoffCoords({ latitude: data.dropoff_lat, longitude: data.dropoff_lng });
+  //     } catch { /* non-fatal */ }
+  //   })();
+  // }, [user?.id]);
 
   // ── Trip Realtime subscription ────────────────────────────────────────
   useEffect(() => {
