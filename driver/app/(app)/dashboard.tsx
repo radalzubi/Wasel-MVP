@@ -124,6 +124,10 @@ export default function DashboardScreen() {
   // Prevents the Realtime trip-update channel from acting on CDC catchup
   // events (replayed while-offline events) immediately after a restore.
   const justRestoredRef = useRef(false);
+  // Tracks when the driver initiates a cancel so the Realtime CDC echo
+  // that fires back to the same subscription doesn't wrongly show
+  // "The rider has cancelled this trip" to the driver.
+  const driverCancelledRef = useRef(false);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const pulseLoopRef = useRef<Animated.CompositeAnimation | null>(null);
 
@@ -133,12 +137,14 @@ export default function DashboardScreen() {
     isMounted.current = true;
 
     if (Platform.OS === 'android') {
+      // .catch() prevents an unhandled-promise-rejection crash if the Android
+      // notifications system is unavailable (e.g., emulator without Play Services).
       Notifications.setNotificationChannelAsync('wasel-trips', {
         name: 'Wasel Trip Alerts',
         importance: Notifications.AndroidImportance.HIGH,
         sound: 'default',
         vibrationPattern: [0, 250, 250, 250],
-      });
+      }).catch((e: unknown) => console.warn('[notifications] channel setup failed:', e));
     }
 
     return () => { isMounted.current = false; };
@@ -390,7 +396,14 @@ export default function DashboardScreen() {
             setCurrentTrip(null);
             setRiderInfo(null);
             setTripDetails(null);
-            Alert.alert('Trip Cancelled', 'The rider has cancelled this trip.');
+            // Only show the "rider cancelled" alert when the cancellation came
+            // from the rider. driverCancelledRef is set true in advanceTripStatus
+            // before the cancel network call, so the CDC echo back to this
+            // subscription is expected and should be silent.
+            if (!driverCancelledRef.current) {
+              Alert.alert('Trip Cancelled', 'The rider has cancelled this trip.');
+            }
+            driverCancelledRef.current = false;
           }
         } catch { /* guard against malformed payload */ }
       })
@@ -537,18 +550,25 @@ export default function DashboardScreen() {
 
   async function advanceTripStatus(nextStatus: string) {
     if (!currentTrip) return;
-    // Snapshot the trip ID before any async gap
-    const tripId = currentTrip.id;
+    // Snapshot trip ID and full UI state before any async gap.
+    const tripId           = currentTrip.id;
+    const savedTrip        = currentTrip;
+    const savedRiderInfo   = riderInfo;
+    const savedTripDetails = tripDetails;
+
     // Optimistic clear for cancel: hide the trip panel immediately rather than
     // waiting 1-2s for the network round-trip (gives instant UI feedback).
+    // Also set driverCancelledRef so the CDC echo back to the Realtime
+    // subscription doesn't show "The rider has cancelled this trip."
     if (nextStatus === 'cancelled') {
+      driverCancelledRef.current = true;
       setCurrentTrip(null);
       setRiderInfo(null);
       setTripDetails(null);
     }
     try {
       const token = await getToken();
-      if (!token) throw new Error('No session');
+      if (!token) throw new Error('No session — please sign in again.');
       const res = await fetch(`${API_URL}/api/trips/${tripId}/status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -556,7 +576,7 @@ export default function DashboardScreen() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `HTTP ${res.status}`);
+        throw new Error(body.error || `Server error (HTTP ${res.status})`);
       }
       if (!isMounted.current) return;
       if (nextStatus === 'completed') {
@@ -573,6 +593,15 @@ export default function DashboardScreen() {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Please try again.';
       Alert.alert('Status update failed', msg);
+      // If cancel failed (network error, server error, no session), restore
+      // the trip UI so the driver can retry. Without this the driver's screen
+      // shows no active trip while the rider still has a live booking.
+      if (nextStatus === 'cancelled' && isMounted.current) {
+        driverCancelledRef.current = false;
+        setCurrentTrip(savedTrip);
+        setRiderInfo(savedRiderInfo);
+        setTripDetails(savedTripDetails);
+      }
     }
   }
 
