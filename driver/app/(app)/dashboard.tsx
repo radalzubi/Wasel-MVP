@@ -226,9 +226,16 @@ export default function DashboardScreen() {
           const data = await res.json();
           setSubscriptionTier(data.subscription_tier ?? 1);
           setIsApproved(data.is_approved ?? false);
-          // Restore the persisted online state so the driver doesn't have to
-          // tap "Go Online" every time they reopen the app.
-          if (data.is_online === true) setIsOnline(true);
+          // Driver always starts OFFLINE on app open — do not restore is_online.
+          // If the DB still has is_online=true from a previous session, reset it
+          // now so the dispatch engine doesn't route offers to an offline driver.
+          if (data.is_online === true) {
+            fetch(`${API_URL}/api/drivers/status`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              body: JSON.stringify({ is_online: false, is_available: false }),
+            }).catch(() => {}); // fire-and-forget; non-fatal if it fails
+          }
         }
       } catch { /* non-fatal */ }
     })();

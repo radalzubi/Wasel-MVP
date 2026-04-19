@@ -283,9 +283,11 @@ export default function HomeScreen() {
         if (!res.ok || !isMounted.current) return;
         const pending = await res.json();
         if (!pending?.id || !isMounted.current) return;
-        // Only silently cancel pre-dispatch stale trips (no driver yet).
-        // Driver-assigned trips are real bookings — leave them alone.
-        if (pending.status === 'requested' || pending.status === 'dispatching') {
+        // Always cancel any active trip on mount — the app should start fresh
+        // every time. In production this would be changed to restore mid-trip
+        // state, but for MVP testing a clean slate on open is the right default.
+        const ACTIVE_STATUSES = ['requested', 'dispatching', 'accepted', 'en_route', 'arrived', 'in_progress'];
+        if (ACTIVE_STATUSES.includes(pending.status)) {
           await fetch(`${API_URL}/api/trips/${pending.id}/status`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -293,8 +295,6 @@ export default function HomeScreen() {
           });
           console.log('[mount-cleanup] silently cancelled stale trip', pending.id, 'in status', pending.status);
         }
-        // Trips in accepted/en_route/arrived/in_progress are handled by the
-        // Cancel & Retry flow if the user tries to request a new ride.
       } catch { /* non-fatal — a failure here does not block the UI */ }
     })();
   }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
