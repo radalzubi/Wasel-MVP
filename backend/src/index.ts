@@ -112,29 +112,29 @@ app.use('/api/explore', exploreRouter);
 // multiple instances (optimistic concurrency on the offer row
 // prevents double-dispatch).
 // ----------------------------------------------------------------
-import { startDispatchPoller } from './dispatch/engine';
+import { startDispatchPoller, startDataCleanupJob } from './dispatch/engine';
 
 app.listen(PORT, () => {
   console.log(`Wasel backend running on port ${PORT}`);
   console.log(`Waitlist mode: ${WAITLIST_MODE}`);
   console.log(`Environment: ${process.env.NODE_ENV ?? 'unset'}`);
 
-  // Start the durable dispatch poller (only in non-waitlist mode)
   if (!WAITLIST_MODE) {
-    const pollerHandle = startDispatchPoller();
+    const pollerHandle  = startDispatchPoller();
+    const cleanupHandle = startDataCleanupJob();
     console.log('[dispatch] Poller started (interval: 5s)');
-    // Graceful shutdown: clear the poller so in-progress DB operations
-    // can complete before the process exits.
-    process.on('SIGTERM', () => {
+    console.log('[cleanup]  Data cleanup job started (interval: 30min)');
+
+    // Graceful shutdown: clear both intervals so in-flight DB operations
+    // can finish before the process exits (avoids partial deletes).
+    function shutdown(signal: string) {
       clearInterval(pollerHandle);
-      console.log('[dispatch] Poller stopped (SIGTERM)');
+      clearInterval(cleanupHandle);
+      console.log(`[shutdown] Poller + cleanup stopped (${signal})`);
       process.exit(0);
-    });
-    process.on('SIGINT', () => {
-      clearInterval(pollerHandle);
-      console.log('[dispatch] Poller stopped (SIGINT)');
-      process.exit(0);
-    });
+    }
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT',  () => shutdown('SIGINT'));
   }
 });
 

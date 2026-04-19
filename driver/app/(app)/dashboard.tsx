@@ -351,13 +351,22 @@ export default function DashboardScreen() {
           });
           if (d.pickup_lat != null && d.pickup_lng != null) {
             const pickupCoord = { latitude: d.pickup_lat, longitude: d.pickup_lng };
-            const points = location ? [location, pickupCoord] : [pickupCoord];
             setTimeout(() => {
               if (!isMounted.current) return;
-              mapRef.current?.fitToCoordinates(points, {
-                edgePadding: { top: 100, right: 60, bottom: 320, left: 60 },
-                animated: true,
-              });
+              if (location) {
+                // fitToCoordinates requires ≥2 points — crashes natively with 1 point on Android
+                mapRef.current?.fitToCoordinates([location, pickupCoord], {
+                  edgePadding: { top: 100, right: 60, bottom: 320, left: 60 },
+                  animated: true,
+                });
+              } else {
+                // GPS not resolved yet — centre on pickup without fitting
+                mapRef.current?.animateToRegion({
+                  ...pickupCoord,
+                  latitudeDelta: 0.02,
+                  longitudeDelta: 0.02,
+                }, 600);
+              }
             }, 300);
           }
         }

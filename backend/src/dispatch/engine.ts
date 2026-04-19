@@ -3,8 +3,11 @@ import { haversineKm } from './geo';
 import { bmpScore, DriverCandidate } from './scoring';
 import { sendPush } from '../lib/push';
 
-const OFFER_TIMEOUT_SECONDS = 15;
-const MAX_SEARCH_RADIUS_KM  = 10;
+const OFFER_TIMEOUT_SECONDS  = 15;
+const MAX_SEARCH_RADIUS_KM   = 10;
+const CLEANUP_INTERVAL_MS    = 30 * 60 * 1_000;  // 30 minutes
+const OFFER_RETENTION_MS     =  2 * 60 * 60 * 1_000;  // 2 hours
+const HISTORY_RETENTION_MS   = 90 * 24 * 60 * 60 * 1_000; // 90 days
 
 // When TEST_BYPASS_ENABLED is set (or NODE_ENV is dev/test), ignore geographic
 // distance so cross-region testing works (e.g. driver in Indiana, rider in Amman).
@@ -195,6 +198,60 @@ export async function dispatchTrip(
 
   // No setTimeout here — the poller owns the retry lifecycle (P6).
   return winner.driverId;
+}
+
+// ----------------------------------------------------------------
+// startDataCleanupJob — periodic deletion of stale operational data
+//
+// Without this, trip_offers accumulate at a rate of ~5 per trip (one per
+// dispatch round). After 10,000 trips that's 50,000+ rows that are never
+// read again. trip_status_history grows at ~5 entries per trip similarly.
+//
+// Schedule:
+//   trip_offers (non-pending)  → deleted after 2 hours
+//   trip_status_history        → deleted after 90 days
+//
+// 'pending' offers are never deleted here — the dispatch poller owns them.
+// ----------------------------------------------------------------
+export function startDataCleanupJob(): ReturnType<typeof setInterval> {
+  async function runCleanup() {
+    try {
+      const now = Date.now();
+      const offerCutoff   = new Date(now - OFFER_RETENTION_MS).toISOString();
+      const historyCutoff = new Date(now - HISTORY_RETENTION_MS).toISOString();
+
+      // Remove resolved offers (expired, declined, accepted) older than 2h.
+      // Pending offers are excluded — the poller still needs them.
+      const { error: offerErr } = await supabase
+        .from('trip_offers')
+        .delete()
+        .neq('status', 'pending')
+        .lt('created_at', offerCutoff);
+
+      if (offerErr) {
+        console.error('[cleanup] trip_offers purge failed:', offerErr.message);
+      }
+
+      // Remove trip_status_history entries older than 90 days.
+      // They exist for audit/analytics — 90 days is sufficient retention.
+      const { error: histErr } = await supabase
+        .from('trip_status_history')
+        .delete()
+        .lt('changed_at', historyCutoff);
+
+      if (histErr) {
+        console.error('[cleanup] trip_status_history purge failed:', histErr.message);
+      }
+
+    } catch (err) {
+      console.error('[cleanup] unexpected error:', err);
+    }
+  }
+
+  // Run one cycle immediately on startup so a freshly-deployed backend
+  // cleans up any backlog without waiting 30 minutes.
+  runCleanup();
+  return setInterval(runCleanup, CLEANUP_INTERVAL_MS);
 }
 
 // ----------------------------------------------------------------
