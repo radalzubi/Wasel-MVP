@@ -35,5 +35,8 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
+    // Unique key prevents session collision with the driver app when both are
+    // run in the same Expo Go instance (which shares SecureStore namespace).
+    storageKey: 'wasel-rider-session',
   },
 });

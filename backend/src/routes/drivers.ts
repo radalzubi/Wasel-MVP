@@ -105,7 +105,9 @@ const RegisterSchema = z.object({
 
 // POST /api/drivers/register — first-time driver profile creation.
 // Called after OTP verify returns { status: 'pending_registration' }.
-// Creates profile with is_approved=false; admin must approve before going online.
+// In dev/test mode (TEST_BYPASS_ENABLED or NODE_ENV=development/test), drivers
+// are auto-approved so the full ride flow can be tested immediately.
+// In production, is_approved=false and an admin must approve before going online.
 router.post('/register', requireAuth, async (req: AuthRequest, res) => {
   // Prevent overwriting an existing approved profile.
   const { data: existing } = await supabase
@@ -122,6 +124,11 @@ router.post('/register', requireAuth, async (req: AuthRequest, res) => {
   const { data: authUser } = await supabase.auth.admin.getUserById(req.userId!);
   const phone = authUser?.user?.phone ?? '';
 
+  const isTestBypassEnabled =
+    process.env.NODE_ENV === 'development' ||
+    process.env.NODE_ENV === 'test' ||
+    process.env.TEST_BYPASS_ENABLED === 'true';
+
   const { error } = await supabase.from('drivers').insert({
     id:            req.userId,
     phone,
@@ -129,7 +136,9 @@ router.post('/register', requireAuth, async (req: AuthRequest, res) => {
     vehicle_make:  parsed.data.vehicle_make,
     vehicle_model: parsed.data.vehicle_model,
     vehicle_plate: parsed.data.vehicle_plate.toUpperCase(),
-    is_approved:   false,
+    // Auto-approve in dev/test so the full ride flow can be exercised immediately.
+    // In production this stays false until an admin approves the driver.
+    is_approved:   isTestBypassEnabled,
     is_online:     false,
     is_available:  false,
   });

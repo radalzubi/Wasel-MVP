@@ -300,6 +300,17 @@ router.post('/verify', otpLimiter, async (req, res) => {
 
   const userId = data.user.id;
 
+  // Guard against same phone being used in both apps: if the user already has
+  // a confirmed role in app_metadata, refuse to overwrite it with a different
+  // role.  This prevents a driver from accidentally logging into the rider app
+  // (or vice versa) and corrupting their role metadata.
+  const existingRole = data.user.app_metadata?.role as string | undefined;
+  if (existingRole && existingRole !== role) {
+    return res.status(409).json({
+      error: `This phone is already registered as a ${existingRole}. Please use the ${existingRole} app to sign in.`,
+    });
+  }
+
   if (role === 'rider') {
     // supabaseAdmin: avoids user-JWT pollution from verifyOtp() above
     const { error: upsertErr } = await supabaseAdmin
