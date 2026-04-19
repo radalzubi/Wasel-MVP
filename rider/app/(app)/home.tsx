@@ -463,12 +463,29 @@ export default function HomeScreen() {
     const now = Date.now();
     if (now - lastFitRef.current < 5000) return;
     lastFitRef.current = now;
+    // Only fit both points when the driver is within 200 km of the pickup.
+    // If the driver's GPS is in a different country (e.g., during overseas
+    // testing) fitToCoordinates would span the globe, zoom the map to level 0,
+    // and either crash the native layer or show a blank screen.
+    const driverNearPickup =
+      haversineKm(driverLocation.latitude, driverLocation.longitude,
+                  pickupCoords.latitude,   pickupCoords.longitude) < 200;
     const t = setTimeout(() => {
       if (!isMounted.current) return;
-      mapRef.current?.fitToCoordinates([driverLocation, pickupCoords], {
-        edgePadding: { top: 100, right: 60, bottom: 380, left: 60 },
-        animated: true,
-      });
+      if (driverNearPickup) {
+        mapRef.current?.fitToCoordinates([driverLocation, pickupCoords], {
+          edgePadding: { top: 100, right: 60, bottom: 380, left: 60 },
+          animated: true,
+        });
+      } else {
+        // Driver is far away — just centre on the pickup so the map stays usable.
+        mapRef.current?.animateToRegion({
+          latitude: pickupCoords.latitude,
+          longitude: pickupCoords.longitude,
+          latitudeDelta: 0.02,
+          longitudeDelta: 0.02,
+        }, 600);
+      }
     }, 500);
     return () => clearTimeout(t);
   }, [driverLocation, pickupCoords, tripStatus]);

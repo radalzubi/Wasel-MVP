@@ -397,7 +397,15 @@ export default function DashboardScreen() {
           setTimeout(() => {
             if (didCancel || !isMounted.current) return;
             const currentLoc = locationRef.current;
-            if (currentLoc) {
+            // Only fit both points if the driver is within 200 km of the pickup.
+            // If the driver's GPS fix is in a different country (e.g., during
+            // testing from overseas), fitToCoordinates would span the globe and
+            // produce an extreme zoom-out that crashes the native map layer.
+            const nearPickup =
+              currentLoc &&
+              haversineKm(currentLoc.latitude, currentLoc.longitude,
+                          d.pickup_lat, d.pickup_lng) < 200;
+            if (nearPickup && currentLoc) {
               mapRef.current?.fitToCoordinates([currentLoc, pickupCoord], {
                 edgePadding: { top: 100, right: 60, bottom: 320, left: 60 },
                 animated: true,
