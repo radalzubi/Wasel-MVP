@@ -249,60 +249,73 @@ export default function DashboardScreen() {
     return () => { pulseLoopRef.current?.stop(); };
   }, [offerTimer, offer]);
 
-  // ── Fetch driver profile (tier badge) ────────────────────────────────────
+  // ── Driver bootstrap: profile fetch + active-trip restore ────────────────
+  //
+  // Coherent policy (mirror image of rider-side bootstrap in home.tsx):
+  //   1. Load driver profile (tier, approval, DB is_online).
+  //   2. GET /trips/driver-active. If a live trip exists, RESTORE it — a driver
+  //      who relaunches mid-trip must continue the ride so the rider is not
+  //      stranded. Force is_online=true + is_available=false so the dispatch
+  //      engine does not route offers during the trip.
+  //   3. If no active trip, the driver starts OFFLINE. If the DB still says
+  //      is_online=true from a crashed prior session, reset it so dispatch
+  //      stops sending offers to a closed app.
+  //
+  // Profile + restore are consolidated into a single effect so the is_online
+  // PATCH is never issued twice in conflicting directions during the same boot.
   useEffect(() => {
     if (!user) return;
     (async () => {
       try {
         const token = await getToken();
-        if (!token) return;
-        const res = await fetch(`${API_URL}/api/drivers/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok && isMounted.current) {
-          const data = await res.json();
-          setSubscriptionTier(data.subscription_tier ?? 1);
-          setIsApproved(data.is_approved ?? false);
-          // Driver always starts OFFLINE on app open — do not restore is_online.
-          // If the DB still has is_online=true from a previous session, reset it
-          // now so the dispatch engine doesn't route offers to an offline driver.
-          if (data.is_online === true) {
-            fetch(`${API_URL}/api/drivers/status`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-              body: JSON.stringify({ is_online: false, is_available: false }),
-            }).catch(() => {}); // fire-and-forget; non-fatal if it fails
-          }
+        if (!token || !isMounted.current) return;
+
+        // Fetch profile and active trip in parallel — they're independent reads.
+        const [meRes, activeRes] = await Promise.all([
+          fetch(`${API_URL}/api/drivers/me`,         { headers: { Authorization: `Bearer ${token}` } }),
+          fetch(`${API_URL}/api/trips/driver-active`, { headers: { Authorization: `Bearer ${token}` } }),
+        ]);
+        if (!isMounted.current) return;
+
+        const me         = meRes.ok     ? await meRes.json()     : null;
+        const activeTrip = activeRes.ok ? await activeRes.json() : null;
+        if (!isMounted.current) return;
+
+        if (me) {
+          setSubscriptionTier(me.subscription_tier ?? 1);
+          setIsApproved(me.is_approved ?? false);
         }
-      } catch { /* non-fatal */ }
+
+        if (activeTrip?.id) {
+          // Live trip restore. Suppress the trip-update channel's subscribe()
+          // catch-up fetch for 3 s so it doesn't race against this restore.
+          justRestoredRef.current = true;
+          setTimeout(() => { justRestoredRef.current = false; }, 3000);
+
+          // Set the ref synchronously so any Realtime callback in flight sees
+          // the restored trip as "current" and doesn't wrongly ignore events.
+          currentTripRef.current = { id: activeTrip.id, status: activeTrip.status as TripStatus };
+          setCurrentTrip({ id: activeTrip.id, status: activeTrip.status as TripStatus });
+          setIsOnline(true);
+
+          // Re-assert online+unavailable on the DB in case a crash left the
+          // driver's row in a weird state. Fire-and-forget — idempotent anyway.
+          fetch(`${API_URL}/api/drivers/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ is_online: true, is_available: false }),
+          }).catch(() => {});
+        } else if (me?.is_online === true) {
+          // Fresh state with stale is_online flag. Driver UI starts offline; sync DB.
+          fetch(`${API_URL}/api/drivers/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ is_online: false, is_available: false }),
+          }).catch(() => {});
+        }
+      } catch { /* non-fatal — bootstrap failure does not block the UI */ }
     })();
   }, [user, getToken]);
-
-  // ── Trip restore disabled for MVP testing ────────────────────────────────
-  // Re-enable the block below for production so drivers who restart mid-trip
-  // can continue without leaving the rider stranded.
-  // During testing we want a clean idle state on every app open so stale
-  // test data from previous sessions never bleeds through.
-  //
-  // useEffect(() => {
-  //   if (!user) return;
-  //   (async () => {
-  //     try {
-  //       const token = await getToken();
-  //       if (!token) return;
-  //       const res = await fetch(`${API_URL}/api/trips/driver-active`, {
-  //         headers: { Authorization: `Bearer ${token}` },
-  //       });
-  //       if (!res.ok || !isMounted.current) return;
-  //       const data = await res.json();
-  //       if (!data?.id) return;
-  //       justRestoredRef.current = true;
-  //       setTimeout(() => { justRestoredRef.current = false; }, 3000);
-  //       setIsOnline(true);
-  //       setCurrentTrip({ id: data.id, status: data.status as TripStatus });
-  //     } catch { /* non-fatal */ }
-  //   })();
-  // }, [user, getToken]);
 
   // ── Initial location on mount ─────────────────────────────────────────────
   useEffect(() => {

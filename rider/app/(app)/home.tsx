@@ -299,12 +299,19 @@ export default function HomeScreen() {
     })();
   }, [user?.id]);
 
-  // ── Auto-cleanup stale pre-dispatch trips on mount (Fix 3) ──────────────
-  // When a previous session crashed or was killed mid-dispatch, the trip stays
-  // in 'requested' or 'dispatching' and blocks the next ride request with a 409.
-  // This effect silently cancels those stale trips so the user always starts clean.
-  // Trips in driver-assigned states (accepted/en_route/arrived/in_progress) are
-  // left alone — they represent real in-progress rides (handled by Cancel & Retry).
+  // ── Trip-session bootstrap: restore live trip OR cancel stale pre-dispatch ──
+  //
+  // Coherent policy (mirror image of driver-side bootstrap in dashboard.tsx):
+  //   1. GET /trips/active → LIVE statuses only (accepted/en_route/arrived/in_progress).
+  //      If present, restore the full trip UI. Rider does NOT lose a legitimate
+  //      ride just because the app was closed and reopened.
+  //   2. Otherwise, GET /trips/any-pending and cancel only PRE-DISPATCH stale
+  //      trips ('requested' / 'dispatching'). These have no driver and are
+  //      almost certainly leftovers from a crashed session — cancelling them
+  //      unblocks the next ride request with a 409 loop.
+  //
+  // Live-status trips are NEVER destroyed here. A rider who wants to cancel an
+  // in-progress ride must use the Cancel button in the trip panel.
   useEffect(() => {
     if (!user) return;
     (async () => {
@@ -312,25 +319,64 @@ export default function HomeScreen() {
         const { data: { session } } = await supabase.auth.getSession();
         const token = session?.access_token;
         if (!token || !isMounted.current) return;
-        const res = await fetch(`${API_URL}/api/trips/any-pending`, {
+
+        // Step 1 — restore live trip if one exists.
+        const activeRes = await fetch(`${API_URL}/api/trips/active`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (!res.ok || !isMounted.current) return;
-        const pending = await res.json();
+        if (!isMounted.current) return;
+        if (activeRes.ok) {
+          const active = await activeRes.json();
+          if (active?.id && isMounted.current) {
+            // Suppress the subscribe() catch-up fetch for 3 s so it can't race
+            // against this restore and wipe the state we just populated.
+            justRestoredRef.current = true;
+            setTimeout(() => { justRestoredRef.current = false; }, 3000);
+
+            // Populate trip state synchronously. Set the ref before setState so
+            // any in-flight Realtime callback sees the correct "current trip" id.
+            currentTripIdRef.current = active.id;
+            setTripId(active.id);
+            setTripStatus(active.status as TripStatus);
+            if (active.driver_id) setDriverId(active.driver_id);
+
+            // Coordinates — guard NaN/null from backend before passing to map.
+            if (typeof active.pickup_lat === 'number' && isFinite(active.pickup_lat) &&
+                typeof active.pickup_lng === 'number' && isFinite(active.pickup_lng)) {
+              setPickupCoords({ latitude: active.pickup_lat, longitude: active.pickup_lng });
+            }
+            if (typeof active.dropoff_lat === 'number' && isFinite(active.dropoff_lat) &&
+                typeof active.dropoff_lng === 'number' && isFinite(active.dropoff_lng)) {
+              setDropoffCoords({ latitude: active.dropoff_lat, longitude: active.dropoff_lng });
+            }
+            if (active.pickup_address)  setPickup(active.pickup_address);
+            if (active.dropoff_address) setDropoff(active.dropoff_address);
+            if (active.fare_amount != null) setFare(String(active.fare_amount));
+            setSearchMode('confirmed');
+            return; // Live trip restored — do not fall through to the cancel branch.
+          }
+        }
+
+        // Step 2 — no live trip. Check for a stale pre-dispatch trip.
+        const pendingRes = await fetch(`${API_URL}/api/trips/any-pending`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!pendingRes.ok || !isMounted.current) return;
+        const pending = await pendingRes.json();
         if (!pending?.id || !isMounted.current) return;
-        // Always cancel any active trip on mount — the app should start fresh
-        // every time. In production this would be changed to restore mid-trip
-        // state, but for MVP testing a clean slate on open is the right default.
-        const ACTIVE_STATUSES = ['requested', 'dispatching', 'accepted', 'en_route', 'arrived', 'in_progress'];
-        if (ACTIVE_STATUSES.includes(pending.status)) {
+
+        // Only cancel PRE-DISPATCH statuses. Live-status trips are out of scope
+        // here — if any-pending returns one at this point, /active must have
+        // returned null a moment ago (race), so leave it for Realtime to pick up.
+        const PRE_DISPATCH = ['requested', 'dispatching'];
+        if (PRE_DISPATCH.includes(pending.status)) {
           await fetch(`${API_URL}/api/trips/${pending.id}/status`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
             body: JSON.stringify({ status: 'cancelled' }),
-          });
-          console.log('[mount-cleanup] silently cancelled stale trip', pending.id, 'in status', pending.status);
+          }).catch(() => {}); // non-fatal — UI stays idle either way
         }
-      } catch { /* non-fatal — a failure here does not block the UI */ }
+      } catch { /* non-fatal — bootstrap failure does not block the UI */ }
     })();
   }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
