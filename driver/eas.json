@@ -1,7 +1,5 @@
 {
-  "cli": {
-    "version": ">= 14.0.0"
-  },
+  "cli": { "version": ">= 14.0.0" },
   "build": {
     "development": {
       "developmentClient": true,
@@ -9,7 +7,8 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://wasel-mvp-production.up.railway.app",
         "EXPO_PUBLIC_SUPABASE_URL": "https://javvotaghswskyuzrgwr.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "<SUPABASE_PUBLISHABLE_KEY>"
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "<SUPABASE_PUBLISHABLE_KEY>",
+        "EXPO_PUBLIC_WAITLIST_MODE": "false"
       }
     },
     "preview": {
@@ -17,28 +16,46 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://wasel-mvp-production.up.railway.app",
         "EXPO_PUBLIC_SUPABASE_URL": "https://javvotaghswskyuzrgwr.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "<SUPABASE_PUBLISHABLE_KEY>"
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "<SUPABASE_PUBLISHABLE_KEY>",
+        "EXPO_PUBLIC_WAITLIST_MODE": "false"
+      }
+    },
+    "testflight": {
+      "distribution": "store",
+      "ios": {
+        "simulator": false
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://wasel-mvp-production.up.railway.app",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://javvotaghswskyuzrgwr.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "<SUPABASE_PUBLISHABLE_KEY>",
+        "EXPO_PUBLIC_WAITLIST_MODE": "false"
       }
     },
     "production": {
       "autoIncrement": true,
+      "distribution": "store",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://wasel-mvp-production.up.railway.app",
         "EXPO_PUBLIC_SUPABASE_URL": "https://javvotaghswskyuzrgwr.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "<SUPABASE_PUBLISHABLE_KEY>"
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "<SUPABASE_PUBLISHABLE_KEY>",
+        "EXPO_PUBLIC_WAITLIST_MODE": "false"
       }
     }
   },
   "submit": {
+    "testflight": {
+      "ios": {
+        "appleId": "YOUR_APPLE_ID@email.com",
+        "ascAppId": "YOUR_APP_STORE_CONNECT_DRIVER_APP_ID",
+        "appleTeamId": "YOUR_TEAM_ID"
+      }
+    },
     "production": {
       "ios": {
         "appleId": "YOUR_APPLE_ID@email.com",
-        "ascAppId": "YOUR_APP_STORE_CONNECT_APP_ID",
-        "appleTeamId": "YOUR_APPLE_TEAM_ID"
-      },
-      "android": {
-        "serviceAccountKeyPath": "./google-service-account.json",
-        "track": "internal"
+        "ascAppId": "YOUR_APP_STORE_CONNECT_DRIVER_APP_ID",
+        "appleTeamId": "YOUR_TEAM_ID"
       }
     }
   }

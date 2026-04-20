@@ -28,10 +28,11 @@ module.exports = ({ config }) => ({
     bundleIdentifier: 'com.wasel.driver',
     supportsTablet:   false,
     infoPlist: {
-      // NOTE: UIBackgroundModes deliberately omitted — Expo Go's Info.plist does NOT
-      // declare background modes, so requesting them here does nothing in Expo Go
-      // and attempting background-gated APIs crashes. Ship via a dev-client build
-      // (eas build --profile development) when you need true background location.
+      // UIBackgroundModes is ignored by Expo Go (fixed binary) but takes effect
+      // in every EAS build (dev-client, preview, production). The runtime code
+      // already gates Location.requestBackgroundPermissionsAsync() behind
+      // !IS_EXPO_GO so Expo Go never calls it; native builds get it correctly.
+      UIBackgroundModes: ['location', 'fetch'],
       LSApplicationQueriesSchemes: ['comgooglemaps', 'googlemaps', 'maps'],
     },
     config: {
@@ -58,14 +59,14 @@ module.exports = ({ config }) => ({
     [
       'expo-location',
       {
-        // Permission strings only. Background/foreground-service flags removed —
-        // they mutate the Android manifest at prebuild time and are ignored by
-        // Expo Go (whose native binary is fixed). Re-enable in a dev-client
-        // profile when you're ready to ship background-location for real.
         locationAlwaysAndWhenInUsePermission:
           'Wasel needs your location in the background to show riders your position while driving.',
         locationWhenInUsePermission:
           'Wasel needs your location to show you nearby trips.',
+        isAndroidForegroundServiceEnabled: true,
+        isAndroidBackgroundLocationEnabled: true,
+        androidForegroundServiceNotificationTitle: 'Wasel Driver — Active',
+        androidForegroundServiceNotificationBody:  'Your location is being shared with riders.',
       },
     ],
     [
