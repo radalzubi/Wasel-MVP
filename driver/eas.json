@@ -21,6 +21,7 @@
       }
     },
     "testflight": {
+      "autoIncrement": true,
       "distribution": "store",
       "ios": {
         "simulator": false
