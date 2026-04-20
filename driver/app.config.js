@@ -25,7 +25,7 @@ module.exports = ({ config }) => ({
     backgroundColor: '#0A0A0A',
   },
   ios: {
-    bundleIdentifier: 'com.wasel.driver',
+    bundleIdentifier: 'com.waselapp.driver',
     supportsTablet:   false,
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
@@ -41,7 +41,7 @@ module.exports = ({ config }) => ({
     },
   },
   android: {
-    package: 'com.wasel.driver',
+    package: 'com.waselapp.driver',
     adaptiveIcon: {
       foregroundImage: './assets/adaptive-icon.png',
       backgroundColor: '#0A0A0A',

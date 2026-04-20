@@ -32,7 +32,7 @@ module.exports = ({ config }) => ({
     backgroundColor: '#0A0A0A',
   },
   ios: {
-    bundleIdentifier: 'com.wasel.rider',
+    bundleIdentifier: 'com.waselapp.rider',
     supportsTablet:   false,
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
@@ -42,7 +42,7 @@ module.exports = ({ config }) => ({
     },
   },
   android: {
-    package: 'com.wasel.rider',
+    package: 'com.waselapp.rider',
     adaptiveIcon: {
       foregroundImage: './assets/adaptive-icon.png',
       backgroundColor: '#0A0A0A',
