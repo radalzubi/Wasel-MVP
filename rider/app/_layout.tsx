@@ -1,9 +1,48 @@
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, Component } from 'react';
+import { View, Text, StyleSheet } from 'react-native';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { LanguageProvider } from '../contexts/LanguageContext';
 import { registerPushToken } from '@wasel/shared';
+
+// ── Root-level ErrorBoundary ──────────────────────────────────────────────────
+// Catches any synchronous throw from LanguageProvider, AuthProvider, AuthGuard,
+// or child screens and renders a recovery UI instead of a silent native crash.
+// Without this, any unhandled JS exception in the render tree causes the app
+// to crash to the home screen with no visible error on iOS.
+class RootErrorBoundary extends Component<
+  { children: React.ReactNode },
+  { hasError: boolean; message: string }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, message: '' };
+  }
+  static getDerivedStateFromError(error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { hasError: true, message };
+  }
+  componentDidCatch(error: unknown, info: React.ErrorInfo) {
+    console.error('[RootErrorBoundary] caught:', error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={eb.container}>
+          <Text style={eb.title}>Something went wrong</Text>
+          <Text style={eb.body}>{this.state.message}</Text>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+const eb = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#0A0A0A', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  title:     { color: '#F5A623', fontSize: 18, fontWeight: '700', marginBottom: 12 },
+  body:      { color: '#888', fontSize: 14, textAlign: 'center' },
+});
 
 // Lives inside AuthProvider so it can call useAuth().
 // Registers the Expo push token once the user signs in.
@@ -67,6 +106,7 @@ function AuthGuard() {
 
 export default function RootLayout() {
   return (
+    <RootErrorBoundary>
     <LanguageProvider>
       <AuthProvider>
         <AuthGuard />
@@ -81,5 +121,6 @@ export default function RootLayout() {
         </Stack>
       </AuthProvider>
     </LanguageProvider>
+    </RootErrorBoundary>
   );
 }

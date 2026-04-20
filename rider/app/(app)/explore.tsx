@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../contexts/AuthContext';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -79,6 +79,7 @@ function SkeletonCard() {
 export default function ExploreScreen() {
   const router = useRouter();
   const { t, language } = useLanguage();
+  const { getAccessToken } = useAuth();
   const [places, setPlaces] = useState<Place[]>([]);
   const [cached, setCached] = useState<Place[]>([]);
   const [category, setCategory] = useState<Category>('all');
@@ -99,8 +100,7 @@ export default function ExploreScreen() {
     setError(null);
 
     try {
-      const session = await supabase.auth.getSession();
-      const token = session.data.session?.access_token;
+      const token = getAccessToken();
 
       const res = await fetch(`${API_URL}/api/explore`, {
         headers: token ? { 'Authorization': `Bearer ${token}` } : {},

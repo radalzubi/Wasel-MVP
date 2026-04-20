@@ -7,7 +7,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { supabase } from '../../lib/supabase';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -87,7 +86,7 @@ function SettingsRow({ icon, label, value, chevron = false, onPress, iconColor =
 
 // ── Main Screen ──────────────────────────────────────────────────────────────
 export default function ProfileScreen() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, getAccessToken } = useAuth();
   const { t, language, toggleLanguage } = useLanguage();
 
   const [profile, setProfile] = useState<RiderProfile | null>(null);
@@ -108,8 +107,7 @@ export default function ProfileScreen() {
     if (!user) { setLoading(false); return; }
     (async () => {
       try {
-        const session = await supabase.auth.getSession();
-        const token = session.data.session?.access_token;
+        const token = getAccessToken();
         if (!token) throw new Error('No token');
 
         const res = await fetch(`${API_URL}/api/riders/me`, {

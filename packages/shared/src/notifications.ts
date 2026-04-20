@@ -1,19 +1,6 @@
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 
-// Show notifications as alerts while the app is foregrounded.
-// Module-level call so every app that imports @wasel/shared gets the behavior
-// without each one having to remember to set the handler.
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
-
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
 type Role = 'rider' | 'driver';
@@ -25,10 +12,27 @@ type Role = 'rider' | 'driver';
  * Safe to call multiple times — silently no-ops if permission is denied
  * or if the Expo projectId is missing (standalone builds only).
  *
+ * IMPORTANT: setNotificationHandler is called here (not at module scope) so it
+ * runs after the React Native bridge is fully initialised. Calling it at module
+ * scope causes a native iOS crash because the notification delegate is not yet
+ * ready when the JS bundle first evaluates.
+ *
  * @param role     Which backend endpoint to register with
  * @param accessToken Supabase session access token
  */
 export async function registerPushToken(role: Role, accessToken: string): Promise<void> {
+  // Set the foreground handler before requesting permissions so that any
+  // permission-grant notification is handled immediately.
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+
   try {
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;

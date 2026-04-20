@@ -50,7 +50,7 @@ interface PlaceSuggestion { place_id: string; display_name: string; lat: string;
 interface RiderProfile { is_waitlist_member?: boolean; }
 
 export default function HomeScreen() {
-  const { user } = useAuth();
+  const { user, getAccessToken } = useAuth();
 
   const { t } = useLanguage();
   const mapRef = useRef<MapView>(null);
@@ -310,8 +310,7 @@ export default function HomeScreen() {
     if (!user) return;
     (async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const token = session?.access_token;
+        const token = getAccessToken();
         if (!token || !isMounted.current) return;
         const res = await fetch(`${API_URL}/api/riders/me`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -338,8 +337,7 @@ export default function HomeScreen() {
     if (!user) return;
     (async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const token = session?.access_token;
+        const token = getAccessToken();
         if (!token || !isMounted.current) return;
 
         // Step 1 — restore live trip if one exists.
@@ -798,8 +796,7 @@ export default function HomeScreen() {
     requestInFlightRef.current = true;
 
     // Token check BEFORE showing the loading state or making any request
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
+    const token = getAccessToken();
     if (!token) {
       requestInFlightRef.current = false;
       Alert.alert(t('error'), 'Session expired. Please sign in again.');
@@ -906,8 +903,7 @@ export default function HomeScreen() {
     selfCancelledRef.current = true; // tell the Realtime handler this was rider-initiated
     if (tripId) {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const token = session?.access_token;
+        const token = getAccessToken();
         if (token) {
           await fetch(`${API_URL}/api/trips/${tripId}/status`, {
             method: 'POST',
@@ -975,8 +971,7 @@ export default function HomeScreen() {
     setShowRatingModal(false);
     if (stars > 0 && ratingTripId) {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const token = session?.access_token;
+        const token = getAccessToken();
         if (token) {
           await fetch(`${API_URL}/api/trips/${ratingTripId}/rate`, {
             method: 'POST',

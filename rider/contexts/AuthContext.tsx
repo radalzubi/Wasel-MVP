@@ -45,12 +45,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const tokenRef = useRef<string | null>(null);
 
   useEffect(() => {
-    // Initial session read.
+    // Prime tokenRef synchronously from storage so getAccessToken() returns a
+    // value even before onAuthStateChange fires. Do NOT call setLoading(false)
+    // here — only onAuthStateChange is the authoritative loading source.
+    // Calling setLoading(false) in both places creates a race where the app
+    // may render authenticated screens with a stale session object, then flip
+    // back to null when onAuthStateChange fires with the real value.
     supabase.auth.getSession().then(({ data: { session } }) => {
-      tokenRef.current = session?.access_token ?? null;
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
+      if (!tokenRef.current) {
+        tokenRef.current = session?.access_token ?? null;
+      }
     });
 
     // Keep ref + state in sync with every auth event. TOKEN_REFRESHED only

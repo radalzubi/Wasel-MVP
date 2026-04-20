@@ -37,7 +37,11 @@ module.exports = ({ config }) => ({
       LSApplicationQueriesSchemes: ['comgooglemaps', 'googlemaps', 'maps'],
     },
     config: {
-      googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY,
+      // Fall back to empty string so the config plugin writes '' rather than
+      // 'undefined' / null to the native plist. An empty key prevents the
+      // Google Maps SDK from throwing NSInternalInconsistencyException on launch
+      // when the env var is missing (e.g. local dev without a .env file).
+      googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY ?? '',
     },
   },
   android: {
@@ -48,7 +52,7 @@ module.exports = ({ config }) => ({
     },
     config: {
       googleMaps: {
-        apiKey: process.env.GOOGLE_MAPS_API_KEY,
+        apiKey: process.env.GOOGLE_MAPS_API_KEY ?? '',
       },
     },
     // googleServicesFile intentionally omitted — the file does not exist.

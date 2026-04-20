@@ -164,7 +164,17 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY).then((stored) => {
-      if (stored === 'ar' || stored === 'en') setLanguage(stored);
+      if (stored === 'ar' || stored === 'en') {
+        setLanguage(stored);
+        // Re-apply RTL direction on every launch so the layout engine is
+        // always in sync with the stored preference. Without this, switching
+        // to Arabic and restarting can leave I18nManager.isRTL in a stale
+        // state, causing layout engine corruption and a native crash.
+        const needsRTL = stored === 'ar';
+        if (I18nManager.isRTL !== needsRTL) {
+          I18nManager.forceRTL(needsRTL);
+        }
+      }
     }).catch(() => {});
   }, []);
 
@@ -183,11 +193,15 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     const nextRTL = lang === 'ar';
     if (I18nManager.isRTL !== nextRTL) {
       I18nManager.forceRTL(nextRTL);
+      // The new RTL direction takes full effect on the NEXT launch — React Native's
+      // layout engine is already running and cannot be hot-switched mid-session.
+      // forceRTL persists the value to native storage so the next launch picks it
+      // up correctly (our startup useEffect above also re-applies it as a safety net).
       Alert.alert(
         lang === 'ar' ? 'مطلوب إعادة تشغيل' : 'Restart Required',
         lang === 'ar'
-          ? 'يرجى إعادة تشغيل التطبيق لتطبيق اللغة العربية'
-          : 'Please restart the app to apply the language change.',
+          ? 'يرجى إغلاق التطبيق وإعادة فتحه لتطبيق اللغة العربية'
+          : 'Please close and reopen the app to apply the language change.',
       );
     }
   }

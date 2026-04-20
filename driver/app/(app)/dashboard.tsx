@@ -53,8 +53,10 @@ interface TripOffer {
   trip_id: string;
   pickup_address: string;
   dropoff_address: string;
-  pickup_lat: number;
-  pickup_lng: number;
+  // Nullable — backend row may occasionally lack geocoded coords.
+  // All consumers must null-check before using in <Marker> or haversineKm.
+  pickup_lat: number | null;
+  pickup_lng: number | null;
   fare_estimate: string;
   distance_km: string;
 }
@@ -101,7 +103,7 @@ const TRIP_STATUS_LABEL: Record<string, string> = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function DashboardScreen() {
-  const { user } = useAuth();
+  const { user, getAccessToken } = useAuth();
   const { t } = useLanguage();
   const mapRef = useRef<MapView>(null);
   const isMounted = useRef(true);
@@ -224,14 +226,12 @@ export default function DashboardScreen() {
   useEffect(() => { locationRef.current = location; }, [location]);
 
   // ── Session helper — one place to get the auth token ─────────────────────
-  const getToken = useCallback(async (): Promise<string | null> => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      return session?.access_token ?? null;
-    } catch {
-      return null;
-    }
-  }, []);
+  // Reads synchronously from the ref kept in sync by onAuthStateChange.
+  // Callers that were written as `await getToken()` still work correctly —
+  // awaiting a non-Promise value is a no-op in JS.
+  const getToken = useCallback((): string | null => {
+    return getAccessToken();
+  }, [getAccessToken]);
 
   // ── Pulse animation for urgent offer timer ────────────────────────────────
   useEffect(() => {
@@ -418,12 +418,10 @@ export default function DashboardScreen() {
             setLocation({ latitude: lat, longitude: lng });
 
             try {
-              const session = await supabase.auth.getSession();
-              // Re-check after the async getSession() call — the user may have
-              // signed out or the effect may have been cleaned up while waiting.
-              if (cancelled || !isMounted.current) return;
-              const token = session.data.session?.access_token;
-              if (!token) return;
+              // Read token synchronously — no async gap means no window where the
+              // effect can be cleaned up between the await and the token read.
+              const token = getAccessToken();
+              if (!token || cancelled || !isMounted.current) return;
               await fetch(`${API_URL}/api/drivers/location`, {
                 method: 'PATCH',
                 headers: {
@@ -685,8 +683,8 @@ export default function DashboardScreen() {
               trip_id:          offerData.trip_id,
               pickup_address:   trip.pickup_address  || 'Pickup location',
               dropoff_address:  trip.dropoff_address || 'Dropoff location',
-              pickup_lat:       trip.pickup_lat  ?? 0,
-              pickup_lng:       trip.pickup_lng  ?? 0,
+              pickup_lat:       trip.pickup_lat  ?? null,
+              pickup_lng:       trip.pickup_lng  ?? null,
               fare_estimate:    trip.fare_amount ? `${trip.fare_amount} JD` : '~2-5 JD',
               distance_km:      distKm != null ? distKm.toFixed(1) : '—',
             });
