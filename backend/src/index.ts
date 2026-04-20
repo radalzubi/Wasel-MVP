@@ -6,6 +6,27 @@ import rateLimit from 'express-rate-limit';
 
 dotenv.config();
 
+// Production bypass guard — fail-loud startup assertion.
+//
+// TEST_BYPASS_ENABLED unlocks three dangerous behaviours:
+//   1. /api/auth/dev-login (hard-coded test users + magic OTP 123456)
+//   2. auto-approval of any newly-registered driver
+//   3. dispatch radius of 99_999 km (worldwide offers to the nearest "driver")
+//
+// Combined with NODE_ENV=production these become a critical exposure. Rather
+// than silently running with them enabled, we refuse to boot so the ops
+// operator notices immediately. Staging environments that legitimately need
+// these features should use NODE_ENV=staging or similar, not production.
+if (process.env.NODE_ENV === 'production' && process.env.TEST_BYPASS_ENABLED === 'true') {
+  // eslint-disable-next-line no-console
+  console.error(
+    '[FATAL] NODE_ENV=production with TEST_BYPASS_ENABLED=true is an unsafe ' +
+    'combination — it exposes dev-login, auto-approves drivers, and removes ' +
+    'the dispatch radius. Unset TEST_BYPASS_ENABLED or set NODE_ENV=staging.',
+  );
+  process.exit(1);
+}
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 

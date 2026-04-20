@@ -15,13 +15,19 @@ export default function VerifyScreen() {
   const [loading, setLoading] = useState(false);
   const [resendTimer, setResendTimer] = useState(30);
   const inputRef = useRef<TextInput>(null);
+  // Tracks mount state so async callbacks don't touch React state or the
+  // router after the user backs out during a verify-in-flight request.
+  const isMounted = useRef(true);
 
   useEffect(() => {
     inputRef.current?.focus();
     const interval = setInterval(() => {
       setResendTimer((t) => (t > 0 ? t - 1 : 0));
     }, 1000);
-    return () => clearInterval(interval);
+    return () => {
+      isMounted.current = false;
+      clearInterval(interval);
+    };
   }, []);
 
   const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
@@ -40,6 +46,7 @@ export default function VerifyScreen() {
         body: JSON.stringify({ phone, token: otp, role: 'rider' }),
       });
       const data = await res.json();
+      if (!isMounted.current) return;
       setLoading(false);
 
       if (!res.ok) {
@@ -47,13 +54,24 @@ export default function VerifyScreen() {
         return;
       }
 
-      await supabase.auth.setSession({
+      // setSession is an intentional side effect even if the user unmounted:
+      // they successfully authenticated and the session should persist.
+      // Capture and surface the error if setSession itself fails (e.g. storage
+      // rejection), otherwise navigation to /home would find no session and
+      // AuthGuard would bounce back to login.
+      const { error: sessionErr } = await supabase.auth.setSession({
         access_token: data.session.access_token,
         refresh_token: data.session.refresh_token,
       });
+      if (!isMounted.current) return;
+      if (sessionErr) {
+        Alert.alert('Session error', sessionErr.message || 'Could not create session.');
+        return;
+      }
 
       router.replace('/(app)/home');
     } catch (err) {
+      if (!isMounted.current) return;
       setLoading(false);
       Alert.alert('Error', 'Could not connect to server. Please try again.');
     }

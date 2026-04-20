@@ -67,10 +67,13 @@ interface TripDetails {
   pickup_address: string;
   dropoff_address: string;
   fare_amount: string;
-  pickup_lat: number;
-  pickup_lng: number;
-  dropoff_lat: number;
-  dropoff_lng: number;
+  // Coords are nullable because the backend row may occasionally lack them
+  // (legacy data, RLS-filtered read, serialization hiccup). Every consumer
+  // must null-check before passing to <Marker>/fitToCoordinates/haversineKm.
+  pickup_lat: number | null;
+  pickup_lng: number | null;
+  dropoff_lat: number | null;
+  dropoff_lng: number | null;
 }
 
 // ── Static lookup tables (module-level — never recreated) ─────────────────────
@@ -107,6 +110,15 @@ export default function DashboardScreen() {
   // Gate ALL map children on this flag — rendering Markers/Polylines before
   // the native map layer fires onMapReady causes native crashes.
   const [mapReady, setMapReady]               = useState(false);
+  // Stash for an initial animateToRegion that was requested before onMapReady.
+  // State (not ref) so a subsequent mapReady flip or new pending region both
+  // trigger the applying effect. Avoids pre-ready native crashes.
+  const [pendingInitialRegion, setPendingInitialRegion] = useState<{
+    latitude: number;
+    longitude: number;
+    latitudeDelta: number;
+    longitudeDelta: number;
+  } | null>(null);
 
   const [isOnline, setIsOnline]               = useState(false);
   const [isApproved, setIsApproved]           = useState<boolean>(false);
@@ -180,28 +192,22 @@ export default function DashboardScreen() {
   // to drop. Without reconnection, the driver never receives new trip offers after
   // the device screen turns off and back on, and the active-trip subscription goes
   // silent — the UI freezes on the last known status.
+  // We avoid reaching into private Supabase internals (`realtime.connect()`)
+  // because those can break between SDK minor versions. Instead we bump a
+  // `reconnectTick` state on foreground resume, which is in the dependency
+  // array of every subscribe effect. Each effect's existing cleanup tears
+  // down its channel and the re-run re-creates it via the public API
+  // (`supabase.channel(...).subscribe(...)`).
+  const [reconnectTick, setReconnectTick] = useState(0);
   useEffect(() => {
     const handleAppStateChange = (nextState: AppStateStatus) => {
       const prev = appStateRef.current;
       appStateRef.current = nextState;
-      // Reconnect when transitioning from background/inactive → active
       if (
         (prev === 'background' || prev === 'inactive') &&
         nextState === 'active'
       ) {
-        try {
-          // supabase.realtime is the RealtimeClient instance.
-          // Call connect() only when disconnected — it is idempotent when
-          // isConnecting() or isConnected(), so the guard prevents double calls.
-          const rt = (supabase as unknown as {
-            realtime: { isConnected: () => boolean; connect: () => void };
-          }).realtime;
-          if (!rt.isConnected()) {
-            rt.connect();
-          }
-        } catch (e) {
-          console.warn('[appstate] realtime reconnect failed:', e);
-        }
+        setReconnectTick((n) => n + 1);
       }
     };
 
@@ -293,18 +299,13 @@ export default function DashboardScreen() {
           typeof activeTrip?.pickup_lng === 'number' && isFinite(activeTrip.pickup_lng) &&
           typeof activeTrip?.dropoff_lat === 'number' && isFinite(activeTrip.dropoff_lat) &&
           typeof activeTrip?.dropoff_lng === 'number' && isFinite(activeTrip.dropoff_lng);
-        // Defence-in-depth: refuse to auto-restore a trip whose created_at is
-        // > 30 min old, even if the backend's 10-min threshold let it through.
-        // Mirrors the rider-side guard in home.tsx.
-        const ageMs = activeTrip?.created_at
-          ? Date.now() - new Date(activeTrip.created_at).getTime()
-          : 0;
-        const isFresh = ageMs <= 30 * 60 * 1000;
+        // Trip age is deliberately NOT part of the restore gate: legitimate
+        // long rides can exceed 30-60 min and must restore cleanly. Backend is
+        // authoritative — if it returned a live trip with valid coords, restore.
         const isRestorable =
           activeTrip?.id &&
           LIVE_STATUSES.includes(activeTrip?.status) &&
-          hasValidCoords &&
-          isFresh;
+          hasValidCoords;
 
         if (isRestorable) {
           // Live trip restore. Suppress the trip-update channel's subscribe()
@@ -345,12 +346,26 @@ export default function DashboardScreen() {
         if (status !== 'granted') return;
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         if (!isMounted.current) return;
-        const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+        const { latitude, longitude } = loc.coords;
+        // GPS can hand back NaN on the simulator or during a poor fix. The
+        // MapView native layer crashes on non-finite values on Android.
+        if (!isFinite(latitude) || !isFinite(longitude)) return;
+        const coords = { latitude, longitude };
         setLocation(coords);
-        mapRef.current?.animateToRegion({ ...coords, latitudeDelta: 0.01, longitudeDelta: 0.01 }, 800);
+        // Defer animateToRegion until onMapReady has fired. State (not ref)
+        // so the applying effect re-runs whichever order things land in.
+        setPendingInitialRegion({ ...coords, latitudeDelta: 0.01, longitudeDelta: 0.01 });
       } catch { /* location unavailable */ }
     })();
   }, []);
+
+  // Apply the stashed initial region once the native map layer is ready.
+  // Handles both orderings (GPS→mapReady or mapReady→GPS).
+  useEffect(() => {
+    if (!mapReady || !pendingInitialRegion) return;
+    mapRef.current?.animateToRegion(pendingInitialRegion, 800);
+    setPendingInitialRegion(null);
+  }, [mapReady, pendingInitialRegion]);
 
   // ── Continuous location updates while online (watchPosition = no manual polling) ──
   useEffect(() => {
@@ -462,14 +477,29 @@ export default function DashboardScreen() {
         const d = await tripRes.json();
         if (didCancel || !isMounted.current) return;
 
+        // Validate each coordinate as a finite number BEFORE committing to state.
+        // The render path uses `!= null` as its gate, so a stringified "NaN" or
+        // a zero-zero pair slipping through from the backend would reach
+        // <Marker coordinate={...} /> and crash the native map layer on Android.
+        // Sanitising here makes the downstream gates safe by construction.
+        const finite = (v: unknown): v is number => typeof v === 'number' && isFinite(v);
+        const safePickup =
+          finite(d.pickup_lat) && finite(d.pickup_lng)
+            ? { lat: d.pickup_lat, lng: d.pickup_lng }
+            : null;
+        const safeDropoff =
+          finite(d.dropoff_lat) && finite(d.dropoff_lng)
+            ? { lat: d.dropoff_lat, lng: d.dropoff_lng }
+            : null;
+
         setTripDetails({
           pickup_address:  d.pickup_address  ?? 'Pickup location',
           dropoff_address: d.dropoff_address ?? 'Dropoff location',
           fare_amount:     d.fare_amount != null ? `${d.fare_amount} JD` : '',
-          pickup_lat:  d.pickup_lat,
-          pickup_lng:  d.pickup_lng,
-          dropoff_lat: d.dropoff_lat,
-          dropoff_lng: d.dropoff_lng,
+          pickup_lat:  safePickup?.lat  ?? null,
+          pickup_lng:  safePickup?.lng  ?? null,
+          dropoff_lat: safeDropoff?.lat ?? null,
+          dropoff_lng: safeDropoff?.lng ?? null,
         });
 
         // Guard: coordinates must be finite numbers (not null/NaN/Infinity) —
@@ -577,7 +607,7 @@ export default function DashboardScreen() {
     return () => {
       try { supabase.removeChannel(channel); } catch { /* ignore — channel may already be gone */ }
     };
-  }, [currentTrip?.id]);
+  }, [currentTrip?.id, reconnectTick]);
 
   // ── Realtime: incoming trip offers ───────────────────────────────────────
   // Dependency is user?.id (UUID string) not the user object — the user object
@@ -661,7 +691,7 @@ export default function DashboardScreen() {
     return () => {
       try { supabase.removeChannel(channel); } catch { /* ignore — channel may already be gone */ }
     };
-  }, [user?.id]);
+  }, [user?.id, reconnectTick]);
 
   // ── Offer countdown timer ─────────────────────────────────────────────────
   useEffect(() => {
@@ -1057,12 +1087,13 @@ export default function DashboardScreen() {
               );
             })()}
 
-            {currentTrip && ['accepted', 'en_route'].includes(currentTrip.status) && tripDetails && (
+            {currentTrip && ['accepted', 'en_route'].includes(currentTrip.status) &&
+              tripDetails?.pickup_lat != null && tripDetails?.pickup_lng != null && (
               <TouchableOpacity
                 style={styles.navBtn}
                 onPress={() => openNavigation(
-                  tripDetails.pickup_lat,
-                  tripDetails.pickup_lng,
+                  tripDetails.pickup_lat as number,
+                  tripDetails.pickup_lng as number,
                 )}
                 activeOpacity={0.8}
               >

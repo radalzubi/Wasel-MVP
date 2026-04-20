@@ -408,24 +408,24 @@ router.get('/any-pending', requireAuth, requireRider, async (req: AuthRequest, r
 // app restart. Only returns trips where a driver is actively involved so the client never
 // accidentally restores a stale pre-dispatch trip.
 //
-// Freshness guard: a trip is only considered "restorable" if it was created within the last
-// 10 minutes. Test trips left in `accepted` state from a prior session must NOT ghost-resurrect
-// on boot. Any older live-status trip found here is auto-cancelled (fail safe to idle) so the
-// rider app can never restore it again.
+// Restore contract: a trip is restorable iff (a) status is live (accepted / en_route /
+// arrived / in_progress), AND (b) coordinates are finite numbers. Age of the trip is
+// NOT a factor — a legitimate long ride (Amman→Madaba, airport runs, rush-hour) can
+// easily exceed 30-60 minutes. Using `created_at` age as a stale-kill signal was
+// silently cancelling real in-flight trips and stranding riders.
 //
-// Why 10 minutes: we share one test rider account across many devices during QA, so any window
-// long enough to cover a real ride (~30-60 min) is also long enough for device A's in-progress
-// trip to "ghost-resurrect" when device B reopens the app. A real user restarting mid-ride
-// within 10 min gets their trip back; anything older is treated as abandoned state.
+// Read endpoints are read-only. Any abandoned-state cleanup is handled by:
+//   (1) the dispatch engine's own poller for requested/dispatching states
+//       (see backend/src/dispatch/engine.ts MAX_REQUESTED_AGE_MS),
+//   (2) explicit rider/driver cancel actions.
+//
+// If multiple live trips exist for the same rider, return the newest and log the
+// data-integrity violation — never mutate here.
 //
 // Must be declared BEFORE /:id so Express doesn't treat "active" as a UUID.
 router.get('/active', requireAuth, requireRider, async (req: AuthRequest, res) => {
   const LIVE_STATUSES = ['accepted', 'en_route', 'arrived', 'in_progress'];
-  const STALE_THRESHOLD_MS = 10 * 60 * 1000;
-  const staleBefore = new Date(Date.now() - STALE_THRESHOLD_MS).toISOString();
 
-  // Fetch ALL live-status trips for this rider (not just fresh ones) so we can
-  // distinguish "nothing to restore" from "stale trip needs cleanup".
   const { data: allActive, error } = await supabase
     .from('trips')
     .select('id, driver_id, status, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, pickup_address, dropoff_address, fare_amount, created_at')
@@ -439,33 +439,12 @@ router.get('/active', requireAuth, requireRider, async (req: AuthRequest, res) =
   }
 
   if ((allActive?.length ?? 0) > 1) {
-    console.error(`[trips/active] DATA INTEGRITY: rider ${req.userId} has ${allActive!.length} concurrent active trips — investigate immediately`);
+    console.error(`[trips/active] DATA INTEGRITY: rider ${req.userId} has ${allActive!.length} concurrent active trips — investigate`);
   }
 
-  const rows = allActive ?? [];
-  const fresh = rows.filter(r => r.created_at && r.created_at >= staleBefore);
-  const stale = rows.filter(r => !r.created_at || r.created_at < staleBefore);
-
-  // Auto-cancel stale live-status trips so they never ghost-restore again.
-  // Fire-and-forget: even if this fails the client still gets `null` and falls
-  // to idle, which is the safe outcome.
-  if (stale.length > 0) {
-    console.warn(`[trips/active] auto-cancelling ${stale.length} stale trip(s) for rider ${req.userId}`);
-    for (const row of stale) {
-      supabase
-        .from('trips')
-        .update({ status: 'cancelled' })
-        .eq('id', row.id)
-        .then(({ error: cancelErr }) => {
-          if (cancelErr) console.error('[trips/active] auto-cancel failed:', cancelErr.message);
-          else recordStatusHistory(row.id, 'cancelled');
-        });
-    }
-  }
-
-  // Strict whitelist on the returned row — never leak a status the client
-  // can't handle, never leak a trip with missing pickup/dropoff coordinates.
-  const candidate = fresh[0];
+  // Strict whitelist on the returned row — never leak a status the client can't
+  // handle, never leak a trip with missing pickup/dropoff coordinates.
+  const candidate = (allActive ?? [])[0];
   if (!candidate) return res.json(null);
   if (!LIVE_STATUSES.includes(candidate.status)) return res.json(null);
   if (
@@ -482,19 +461,15 @@ router.get('/active', requireAuth, requireRider, async (req: AuthRequest, res) =
 });
 
 // GET /api/trips/driver-active — driver's current assigned trip, used to restore the driver UI
-// after an app restart mid-trip. Without this, a driver who relaunches the app mid-trip sees
-// the offline screen and cannot advance the trip — leaving the rider stranded.
+// after an app restart mid-trip. Without this, a driver who relaunches mid-trip sees the offline
+// screen and cannot advance the trip — stranding the rider.
 //
-// Freshness guard: only restore trips created within the last 10 minutes. A live-status trip
-// older than that is leftover state from a prior test or crashed session — auto-cancel it
-// so the driver app never ghost-restores "on trip" mode at launch. Matches the rider-side
-// /active window so a shared test account cannot ghost a trip from one device to another.
+// Restore contract matches /active: live status + finite coords. Trip age is NOT used to
+// determine restorability — a real 60-minute ride must be restorable end-to-end.
 //
 // Must be declared BEFORE /:id so Express doesn't treat "driver-active" as a UUID.
 router.get('/driver-active', requireAuth, requireDriver, async (req: AuthRequest, res) => {
   const LIVE_STATUSES = ['accepted', 'en_route', 'arrived', 'in_progress'];
-  const STALE_THRESHOLD_MS = 10 * 60 * 1000;
-  const staleBefore = new Date(Date.now() - STALE_THRESHOLD_MS).toISOString();
 
   const { data: allActive, error } = await supabase
     .from('trips')
@@ -508,33 +483,11 @@ router.get('/driver-active', requireAuth, requireDriver, async (req: AuthRequest
     return res.status(500).json({ error: 'Failed to fetch active trip' });
   }
 
-  const rows = allActive ?? [];
-  const fresh = rows.filter(r => r.created_at && r.created_at >= staleBefore);
-  const stale = rows.filter(r => !r.created_at || r.created_at < staleBefore);
-
-  if (stale.length > 0) {
-    console.warn(`[trips/driver-active] auto-cancelling ${stale.length} stale trip(s) for driver ${req.userId}`);
-    for (const row of stale) {
-      supabase
-        .from('trips')
-        .update({ status: 'cancelled' })
-        .eq('id', row.id)
-        .then(({ error: cancelErr }) => {
-          if (cancelErr) console.error('[trips/driver-active] auto-cancel failed:', cancelErr.message);
-          else recordStatusHistory(row.id, 'cancelled');
-        });
-    }
-    // Free the driver from any stale "on a trip" state so dispatch can resume.
-    supabase
-      .from('drivers')
-      .update({ is_available: true, became_available_at: new Date().toISOString() })
-      .eq('id', req.userId!)
-      .then(({ error: drvErr }) => {
-        if (drvErr) console.error('[trips/driver-active] driver reset failed:', drvErr.message);
-      });
+  if ((allActive?.length ?? 0) > 1) {
+    console.error(`[trips/driver-active] DATA INTEGRITY: driver ${req.userId} has ${allActive!.length} concurrent active trips — investigate`);
   }
 
-  const candidate = fresh[0];
+  const candidate = (allActive ?? [])[0];
   if (!candidate) return res.json(null);
   if (!LIVE_STATUSES.includes(candidate.status)) return res.json(null);
   if (

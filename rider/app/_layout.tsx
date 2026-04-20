@@ -7,13 +7,21 @@ import { registerPushToken } from '@wasel/shared';
 
 // Lives inside AuthProvider so it can call useAuth().
 // Registers the Expo push token once the user signs in.
+//
+// Depends on user?.id (stable per identity), NOT session.access_token (rotates
+// every hour with autoRefreshToken). The previous dep caused this effect to
+// re-fire on every JWT refresh, burning an Expo SDK call + a backend PATCH
+// hourly per active device. The token handed to registerPushToken is always
+// read from getAccessToken() inside the effect so the latest JWT is used.
 function PushRegistration() {
-  const { session } = useAuth();
+  const { user, getAccessToken } = useAuth();
 
   useEffect(() => {
-    if (!session?.access_token) return;
-    registerPushToken('rider', session.access_token);
-  }, [session?.access_token]);
+    if (!user?.id) return;
+    const token = getAccessToken();
+    if (!token) return;
+    registerPushToken('rider', token);
+  }, [user?.id, getAccessToken]);
 
   return null;
 }

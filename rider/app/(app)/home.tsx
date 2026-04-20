@@ -79,6 +79,16 @@ export default function HomeScreen() {
   // React Native Maps can crash if Markers/Polylines are added to the native
   // map layer before onMapReady fires. Gate all map children on this flag.
   const [mapReady, setMapReady] = useState(false);
+  // Stash for an initial animateToRegion that was requested before onMapReady.
+  // State (not ref) so a subsequent mapReady flip or new pending region both
+  // trigger the applying effect. Avoids pre-ready animateToRegion calls,
+  // which crash the native map layer on both iOS and Android.
+  const [pendingInitialRegion, setPendingInitialRegion] = useState<{
+    latitude: number;
+    longitude: number;
+    latitudeDelta: number;
+    longitudeDelta: number;
+  } | null>(null);
 
   // ── Location ──────────────────────────────────────────────────────────
   const [location, setLocation] = useState<LatLng | null>(null);
@@ -132,9 +142,19 @@ export default function HomeScreen() {
   useEffect(() => () => { isMounted.current = false; }, []);
 
   // ── AppState: reconnect Supabase Realtime on foreground resume ────────────
-  // On real devices, backgrounding the app drops the WebSocket. Without this,
-  // if the rider is mid-trip and resumes the app, the trip subscription silently
-  // stops firing and the UI freezes on the last known status.
+  // On real devices, backgrounding the app can drop the WebSocket silently
+  // (iOS freezes timers/sockets during background). If the rider is mid-trip
+  // and resumes the app, the trip subscription may stop firing and the UI
+  // freezes on the last known status.
+  //
+  // We avoid reaching into private Supabase internals (`realtime.connect()`)
+  // because those can break between SDK minor versions. Instead we bump a
+  // `reconnectTick` state on foreground resume, which is in the dependency
+  // array of every subscribe effect. Each effect's existing cleanup tears
+  // down its channel, and the re-run re-creates it via the public API
+  // (`supabase.channel(...).subscribe(...)`). This stays on the supported
+  // surface and benefits from the same dedupe logic already in place.
+  const [reconnectTick, setReconnectTick] = useState(0);
   useEffect(() => {
     const handleAppStateChange = (nextState: AppStateStatus) => {
       const prev = appStateRef.current;
@@ -143,16 +163,7 @@ export default function HomeScreen() {
         (prev === 'background' || prev === 'inactive') &&
         nextState === 'active'
       ) {
-        try {
-          const rt = (supabase as unknown as {
-            realtime: { isConnected: () => boolean; connect: () => void };
-          }).realtime;
-          if (!rt.isConnected()) {
-            rt.connect();
-          }
-        } catch (e) {
-          console.warn('[appstate] realtime reconnect failed:', e);
-        }
+        setReconnectTick((n) => n + 1);
       }
     };
     const sub = AppState.addEventListener('change', handleAppStateChange);
@@ -230,12 +241,18 @@ export default function HomeScreen() {
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         if (!isMounted.current) return;
         const { latitude, longitude } = loc.coords;
+        // Guard against NaN/Infinity from the GPS layer before touching the map.
+        if (!isFinite(latitude) || !isFinite(longitude)) { defaultToAmman(); return; }
         if (inJordan(latitude, longitude)) {
           const coords = { latitude, longitude };
           setLocation(coords);
           setPickupCoords(coords);
           setPickup(t('currentLocation'));
-          mapRef.current?.animateToRegion({ ...coords, latitudeDelta: 0.01, longitudeDelta: 0.01 }, 800);
+          // Stash the initial region; a dedicated effect below applies it once
+          // the native map layer has fired onMapReady. Using state (not ref)
+          // ensures the effect re-runs whichever of mapReady / pending-region
+          // lands last.
+          setPendingInitialRegion({ ...coords, latitudeDelta: 0.01, longitudeDelta: 0.01 });
         } else {
           defaultToAmman();
         }
@@ -248,8 +265,17 @@ export default function HomeScreen() {
   function defaultToAmman() {
     setPickupCoords(AMMAN);
     setPickup('Amman, Jordan');
-    mapRef.current?.animateToRegion({ ...AMMAN, latitudeDelta: 0.05, longitudeDelta: 0.05 }, 800);
+    setPendingInitialRegion({ ...AMMAN, latitudeDelta: 0.05, longitudeDelta: 0.05 });
   }
+
+  // Apply the stashed initial region once the map is ready. Runs whenever
+  // either mapReady or pendingInitialRegion changes, so it handles both
+  // orderings (GPS→mapReady or mapReady→GPS) cleanly.
+  useEffect(() => {
+    if (!mapReady || !pendingInitialRegion) return;
+    mapRef.current?.animateToRegion(pendingInitialRegion, 800);
+    setPendingInitialRegion(null);
+  }, [mapReady, pendingInitialRegion]);
 
   // ── Fetch fare estimate + real polyline from backend ─────────────────
   async function fetchEstimate(
@@ -335,20 +361,15 @@ export default function HomeScreen() {
             typeof active?.pickup_lng === 'number' && isFinite(active.pickup_lng) &&
             typeof active?.dropoff_lat === 'number' && isFinite(active.dropoff_lat) &&
             typeof active?.dropoff_lng === 'number' && isFinite(active.dropoff_lng);
-          // Defence-in-depth: even if the backend's 10-min threshold lets
-          // something older through, the client refuses to auto-restore a trip
-          // whose created_at is > 30 min old. Keeps the shared test account
-          // from boot-resurrecting yesterday's "driver accepted" screen.
-          const ageMs = active?.created_at
-            ? Date.now() - new Date(active.created_at).getTime()
-            : 0;
-          const isFresh = ageMs <= 30 * 60 * 1000;
+          // Trip age is deliberately NOT part of the restore gate: legitimate
+          // long rides (airport, rush-hour, Amman→Madaba) can exceed 30-60 min
+          // and must restore cleanly. Backend is authoritative — if it returned
+          // a live trip with valid coords and a driver assignment, restore it.
           const isRestorable =
             active?.id &&
             active?.driver_id &&                         // pre-dispatch trips have no driver
             LIVE_STATUSES.includes(active?.status) &&
-            hasValidCoords &&
-            isFresh;
+            hasValidCoords;
 
           if (isRestorable && isMounted.current) {
             // Suppress the subscribe() catch-up fetch for 3 s so it can't race
@@ -504,7 +525,7 @@ export default function HomeScreen() {
     return () => {
       try { supabase.removeChannel(ch); } catch { /* ignore — channel may already be gone */ }
     };
-  }, [tripId]);
+  }, [tripId, reconnectTick]);
 
   // ── Live driver location subscription ────────────────────────────────
   useEffect(() => {
@@ -565,7 +586,7 @@ export default function HomeScreen() {
     return () => {
       try { supabase.removeChannel(ch); } catch { /* ignore — channel may already be gone */ }
     };
-  }, [driverId, tripStatus]);
+  }, [driverId, tripStatus, reconnectTick]);
 
   // ── Fetch driver name, phone, and vehicle when driverId becomes known ───
   useEffect(() => {
@@ -904,6 +925,28 @@ export default function HomeScreen() {
     // await, so setting it to null here (before any re-render) prevents stale
     // callbacks from calling setTripStatus after the trip has been torn down.
     currentTripIdRef.current = null;
+
+    // Explicit channel teardown — defence in depth. The subscribe useEffects
+    // already clean up via their dep arrays when tripId/driverId flip to
+    // null, but relying solely on effect-cleanup order leaves a narrow window
+    // in which a late-arriving CDC event can reach a now-stale handler. A
+    // direct removeChannel here closes that window.
+    try {
+      const channels = supabase.getChannels();
+      const previousTripId = tripId;
+      const previousDriverId = driverId;
+      channels.forEach((c) => {
+        const topic = c.topic || '';
+        const isStaleTripChannel =
+          previousTripId && topic.includes(`trip-${previousTripId}`);
+        const isStaleDriverLocChannel =
+          previousDriverId && topic.includes(`driver-loc-${previousDriverId}`);
+        if (isStaleTripChannel || isStaleDriverLocChannel) {
+          try { supabase.removeChannel(c); } catch { /* ignore */ }
+        }
+      });
+    } catch { /* non-fatal — effect cleanup will catch the rest */ }
+
     // Clear the explore-param key so the next "Ride here" pick is applied even
     // if the user picks the same destination again after a completed trip.
     lastAppliedExploreRef.current = null;
