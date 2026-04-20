@@ -28,6 +28,7 @@ module.exports = ({ config }) => ({
     bundleIdentifier: 'com.wasel.driver',
     supportsTablet:   false,
     infoPlist: {
+      ITSAppUsesNonExemptEncryption: false,
       // UIBackgroundModes is ignored by Expo Go (fixed binary) but takes effect
       // in every EAS build (dev-client, preview, production). The runtime code
       // already gates Location.requestBackgroundPermissionsAsync() behind
