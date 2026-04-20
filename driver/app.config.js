@@ -28,7 +28,10 @@ module.exports = ({ config }) => ({
     bundleIdentifier: 'com.wasel.driver',
     supportsTablet:   false,
     infoPlist: {
-      UIBackgroundModes: ['location', 'fetch'],
+      // NOTE: UIBackgroundModes deliberately omitted — Expo Go's Info.plist does NOT
+      // declare background modes, so requesting them here does nothing in Expo Go
+      // and attempting background-gated APIs crashes. Ship via a dev-client build
+      // (eas build --profile development) when you need true background location.
       LSApplicationQueriesSchemes: ['comgooglemaps', 'googlemaps', 'maps'],
     },
     config: {
@@ -46,21 +49,23 @@ module.exports = ({ config }) => ({
         apiKey: process.env.GOOGLE_MAPS_API_KEY,
       },
     },
-    googleServicesFile: './google-services.json',
+    // googleServicesFile intentionally omitted — the file does not exist.
+    // Re-add only when you have a real Firebase google-services.json to ship
+    // (and guard it: `...(fs.existsSync(...) ? { googleServicesFile } : {})`).
   },
   plugins: [
     'expo-router',
     [
       'expo-location',
       {
+        // Permission strings only. Background/foreground-service flags removed —
+        // they mutate the Android manifest at prebuild time and are ignored by
+        // Expo Go (whose native binary is fixed). Re-enable in a dev-client
+        // profile when you're ready to ship background-location for real.
         locationAlwaysAndWhenInUsePermission:
           'Wasel needs your location in the background to show riders your position while driving.',
         locationWhenInUsePermission:
           'Wasel needs your location to show you nearby trips.',
-        isAndroidForegroundServiceEnabled: true,
-        isAndroidBackgroundLocationEnabled: true,
-        androidForegroundServiceNotificationTitle: 'Wasel Driver — Active',
-        androidForegroundServiceNotificationBody:  'Your location is being shared with riders.',
       },
     ],
     [

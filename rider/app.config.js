@@ -49,7 +49,9 @@ module.exports = ({ config }) => ({
         apiKey: process.env.GOOGLE_MAPS_API_KEY,
       },
     },
-    googleServicesFile: './google-services.json',
+    // googleServicesFile intentionally omitted — the file does not exist.
+    // Re-add only when you have a real Firebase google-services.json to ship
+    // (and guard it: `...(fs.existsSync(...) ? { googleServicesFile } : {})`).
   },
   plugins: [
     'expo-router',

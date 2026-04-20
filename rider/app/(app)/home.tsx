@@ -329,11 +329,20 @@ export default function HomeScreen() {
             typeof active?.pickup_lng === 'number' && isFinite(active.pickup_lng) &&
             typeof active?.dropoff_lat === 'number' && isFinite(active.dropoff_lat) &&
             typeof active?.dropoff_lng === 'number' && isFinite(active.dropoff_lng);
+          // Defence-in-depth: even if the backend's 10-min threshold lets
+          // something older through, the client refuses to auto-restore a trip
+          // whose created_at is > 30 min old. Keeps the shared test account
+          // from boot-resurrecting yesterday's "driver accepted" screen.
+          const ageMs = active?.created_at
+            ? Date.now() - new Date(active.created_at).getTime()
+            : 0;
+          const isFresh = ageMs <= 30 * 60 * 1000;
           const isRestorable =
             active?.id &&
             active?.driver_id &&                         // pre-dispatch trips have no driver
             LIVE_STATUSES.includes(active?.status) &&
-            hasValidCoords;
+            hasValidCoords &&
+            isFresh;
 
           if (isRestorable && isMounted.current) {
             // Suppress the subscribe() catch-up fetch for 3 s so it can't race

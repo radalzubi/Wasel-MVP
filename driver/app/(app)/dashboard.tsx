@@ -6,7 +6,13 @@ import {
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
+import Constants from 'expo-constants';
 import { DARK_MAP_STYLE, haversineKm } from '@wasel/shared';
+
+// In Expo Go, Constants.executionEnvironment === 'storeClient'.
+// In a dev-client / standalone build, it's 'bare' or 'standalone'.
+// Used to skip APIs that require native-binary changes (e.g. background location).
+const IS_EXPO_GO = Constants.executionEnvironment === 'storeClient';
 import * as Notifications from 'expo-notifications';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -286,10 +292,18 @@ export default function DashboardScreen() {
           typeof activeTrip?.pickup_lng === 'number' && isFinite(activeTrip.pickup_lng) &&
           typeof activeTrip?.dropoff_lat === 'number' && isFinite(activeTrip.dropoff_lat) &&
           typeof activeTrip?.dropoff_lng === 'number' && isFinite(activeTrip.dropoff_lng);
+        // Defence-in-depth: refuse to auto-restore a trip whose created_at is
+        // > 30 min old, even if the backend's 10-min threshold let it through.
+        // Mirrors the rider-side guard in home.tsx.
+        const ageMs = activeTrip?.created_at
+          ? Date.now() - new Date(activeTrip.created_at).getTime()
+          : 0;
+        const isFresh = ageMs <= 30 * 60 * 1000;
         const isRestorable =
           activeTrip?.id &&
           LIVE_STATUSES.includes(activeTrip?.status) &&
-          hasValidCoords;
+          hasValidCoords &&
+          isFresh;
 
         if (isRestorable) {
           // Live trip restore. Suppress the trip-update channel's subscribe()
@@ -353,14 +367,17 @@ export default function DashboardScreen() {
           return;
         }
 
-        // Request background permission ("Always Allow" on iOS, foreground service on Android).
-        // Wrapped in its own try-catch: Expo Go on iOS throws an unhandled rejection here
-        // because NSLocationAlwaysAndWhenInUseUsageDescription is absent from Expo Go's
-        // Info.plist. The error is non-fatal — fall through to foreground-only mode.
-        try {
-          await Location.requestBackgroundPermissionsAsync();
-        } catch (bgErr) {
-          console.warn('[location] background permission unavailable (foreground-only mode):', bgErr);
+        // Background permission only makes sense in a dev-client / standalone build.
+        // Expo Go's Info.plist does NOT declare NSLocationAlwaysAndWhenInUseUsageDescription
+        // or UIBackgroundModes=['location'], so the native request either throws
+        // synchronously OR emits an unhandled native promise rejection on iOS that
+        // can crash the app under the New Architecture. Skip entirely in Expo Go.
+        if (!IS_EXPO_GO) {
+          try {
+            await Location.requestBackgroundPermissionsAsync();
+          } catch (bgErr) {
+            console.warn('[location] background permission unavailable (foreground-only mode):', bgErr);
+          }
         }
 
         if (cancelled) return;

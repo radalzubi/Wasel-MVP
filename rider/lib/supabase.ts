@@ -4,8 +4,19 @@ import { createClient } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
+const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+
+// Fail loudly at import time with a clear message instead of letting createClient
+// crash deep inside its own code with "undefined is not a string" — that form of
+// crash presents as an instant dismiss back to the iOS home screen with no RedBox,
+// which looks identical to a native crash and wastes hours of debugging.
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error(
+    '[rider/supabase] Missing EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY. ' +
+    'Check rider/.env is present and that `expo start` picked it up (env: load .env line should appear in Metro output).'
+  );
+}
 
 /**
  * SecureStore adapter for @supabase/supabase-js storage option.
