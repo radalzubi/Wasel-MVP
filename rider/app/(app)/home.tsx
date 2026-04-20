@@ -8,7 +8,13 @@ import {
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import PolylineDecoder from '@mapbox/polyline';
 import * as Location from 'expo-location';
+import Constants from 'expo-constants';
 import { DARK_MAP_STYLE, haversineKm } from '@wasel/shared';
+
+// Expo Go has a fixed binary — Google Maps SDK is not included.
+// In every EAS build (dev-client / testflight / production) this is false
+// and PROVIDER_GOOGLE + dark map style work correctly.
+const IS_EXPO_GO = Constants.executionEnvironment === 'storeClient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
@@ -977,11 +983,11 @@ export default function HomeScreen() {
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
-        provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
+        provider={IS_EXPO_GO ? undefined : PROVIDER_GOOGLE}
         initialRegion={{ ...AMMAN, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
         showsUserLocation={showUserLocation}
         showsMyLocationButton={false}
-        customMapStyle={DARK_MAP_STYLE}
+        customMapStyle={IS_EXPO_GO ? undefined : DARK_MAP_STYLE}
         onMapReady={() => setMapReady(true)}
       >
         {/* Gate ALL map children on mapReady — adding Markers/Polylines before the

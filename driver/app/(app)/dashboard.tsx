@@ -6,19 +6,20 @@ import {
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { DARK_MAP_STYLE, haversineKm } from '@wasel/shared';
-
-// In Expo Go, Constants.executionEnvironment === 'storeClient'.
-// In a dev-client / standalone build, it's 'bare' or 'standalone'.
-// Used to skip APIs that require native-binary changes (e.g. background location).
-const IS_EXPO_GO = Constants.executionEnvironment === 'storeClient';
-import * as Notifications from 'expo-notifications';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { supabase } from '../../lib/supabase';
+
+// Expo Go (storeClient) has a fixed precompiled binary — Google Maps SDK,
+// background location, and foreground services are not included.
+// In every EAS build (dev-client / testflight / production) this is false
+// and all native features work correctly.
+const IS_EXPO_GO = Constants.executionEnvironment === 'storeClient';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 const AMMAN = { latitude: 31.9539, longitude: 35.9106 };
@@ -865,10 +866,10 @@ export default function DashboardScreen() {
       <MapView
         ref={mapRef}
         style={styles.map}
-        provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
+        provider={IS_EXPO_GO ? undefined : PROVIDER_GOOGLE}
         initialRegion={{ ...AMMAN, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
         showsUserLocation={false}
-        customMapStyle={DARK_MAP_STYLE}
+        customMapStyle={IS_EXPO_GO ? undefined : DARK_MAP_STYLE}
         onMapReady={() => setMapReady(true)}
       >
         {/* Gate ALL map children on mapReady — adding Markers/Polylines before
