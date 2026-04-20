@@ -71,7 +71,8 @@ export async function dispatchTrip(
     .from('drivers')
     .select('id, location_lat, location_lng, subscription_tier, activity_score, became_available_at')
     .eq('is_online', true)
-    .eq('is_available', true);
+    .eq('is_available', true)
+    .eq('is_approved', true);
 
   if (error || !drivers?.length) {
     // No online/available drivers right now — leave the trip in its current state

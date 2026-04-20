@@ -641,11 +641,20 @@ export default function DashboardScreen() {
             const offerData = payload.new;
             if (!offerData?.trip_id) return;
 
-            const { data: trip } = await supabase
-              .from('trips')
-              .select('pickup_address, dropoff_address, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, fare_amount')
-              .eq('id', offerData.trip_id)
-              .single();
+            // Fetch trip data via the backend API instead of querying Supabase
+            // directly. Direct Supabase queries use the user's JWT and are subject
+            // to Row-Level Security — if the RLS policy requires driver_id to
+            // already match auth.uid(), a timing race (dispatch engine hasn't
+            // committed the UPDATE yet) can return null and silently drop the offer.
+            // The backend endpoint uses the service-role client (bypasses RLS) and
+            // also verifies that this driver is the assigned one.
+            const token = await getToken();
+            if (!token) return;
+            const tripRes = await fetch(`${API_URL}/api/trips/${offerData.trip_id}`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!tripRes.ok) return;
+            const trip = await tripRes.json();
 
             // Don't show a new offer if driver is already on an active trip —
             // the backend should prevent this, but guard here for the race window.
@@ -716,28 +725,60 @@ export default function DashboardScreen() {
 
   // ── Actions ───────────────────────────────────────────────────────────────
   async function toggleOnline(value: boolean) {
-    const prev = isOnline;
-    setIsOnline(value);
-
-    // Going offline: dismiss any pending offer immediately so the driver
-    // cannot accept a trip they are about to stop servicing. The offer will
-    // expire naturally on the backend; no need to decline it explicitly.
+    // ── Going OFFLINE ────────────────────────────────────────────────────────
+    // Optimistic update is safe here — worst case the API call fails and the
+    // driver sees themselves as offline while the backend still has them online,
+    // which is a better UX than appearing stuck in a "going offline…" state.
     if (!value) {
+      setIsOnline(false);
       if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
       setOffer(null);
+      try {
+        const token = await getToken();
+        if (token) {
+          await fetch(`${API_URL}/api/drivers/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ is_online: false, is_available: false }),
+          });
+        }
+      } catch { /* silent — UI is already offline */ }
+      return;
     }
 
+    // ── Going ONLINE ─────────────────────────────────────────────────────────
+    // Check location permission BEFORE marking the driver online in the backend.
+    // Without location access the position watcher can't start, the backend
+    // never receives fresh coordinates, and dispatch will never find this driver.
+    const { status: existingPerm } = await Location.getForegroundPermissionsAsync();
+    if (existingPerm !== 'granted') {
+      const { status: newPerm } = await Location.requestForegroundPermissionsAsync();
+      if (newPerm !== 'granted') {
+        Alert.alert(
+          'Location Required',
+          'Wasel needs your location to send you trips. Please enable Location in Settings.',
+          [{ text: 'OK' }],
+        );
+        return; // Don't go online — driver sees switch snap back to Off
+      }
+    }
+
+    // Only set isOnline=true AFTER the backend confirms the update.
+    // This avoids starting the location watcher before the backend is ready.
     try {
       const token = await getToken();
-      if (!token) { if (isMounted.current) setIsOnline(prev); return; }
+      if (!token) { Alert.alert('Error', 'Session expired. Please sign in again.'); return; }
       const res = await fetch(`${API_URL}/api/drivers/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ is_online: value, is_available: value }),
+        body: JSON.stringify({ is_online: true, is_available: true }),
       });
-      if (!res.ok) { if (isMounted.current) setIsOnline(prev); }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (isMounted.current) setIsOnline(true);
     } catch {
-      if (isMounted.current) setIsOnline(prev);
+      if (isMounted.current) {
+        Alert.alert('Could not go online', 'Check your connection and try again.');
+      }
     }
   }
 

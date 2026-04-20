@@ -331,7 +331,7 @@ router.post('/:id/status', requireAuth, async (req: AuthRequest, res) => {
     } else if (!cancellerIsRider) {
       void Promise.resolve(
         supabase.from('riders').select('push_token').eq('id', trip.rider_id).maybeSingle(),
-      ).then(({ data }) => sendPush(data?.push_token, '❌ Trip Cancelled', "Your driver cancelled. We'll find you another one.", { type: 'trip_cancelled', tripId }))
+      ).then(({ data }) => sendPush(data?.push_token, '❌ Trip Cancelled', 'Your driver cancelled. Please request a new ride.', { type: 'trip_cancelled', tripId }))
         .catch(() => {});
     }
   }

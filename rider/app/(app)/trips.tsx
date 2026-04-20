@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../contexts/AuthContext';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -34,9 +34,11 @@ const pill = StyleSheet.create({
 });
 
 export default function TripsScreen() {
+  const { authFetch } = useAuth();
   const [trips, setTrips] = useState<TripRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [fetchError, setFetchError] = useState(false);
 
   // Prevents setState after unmount if the user switches tabs before the fetch completes
   const isMounted = useRef(true);
@@ -47,19 +49,15 @@ export default function TripsScreen() {
 
   async function load(isRefresh = false) {
     if (isRefresh) setRefreshing(true); else setLoading(true);
+    setFetchError(false);
     try {
-      const session = await supabase.auth.getSession();
-      const token = session.data.session?.access_token;
-      if (!isMounted.current) return;
-      const res = await fetch(`${API_URL}/api/riders/trips`, {
-        headers: { Authorization: `Bearer ${token ?? ''}` },
-      });
+      const res = await authFetch(`${API_URL}/api/riders/trips`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: TripRecord[] = await res.json();
       if (!isMounted.current) return;
       setTrips(data);
     } catch {
-      // Silent — stale data is fine
+      if (isMounted.current) setFetchError(true);
     } finally {
       if (isMounted.current) {
         setLoading(false);
@@ -126,10 +124,18 @@ export default function TripsScreen() {
             />
           }
           ListEmptyComponent={
-            <View style={s.empty}>
-              <Ionicons name="car-outline" size={40} color="#333" />
-              <Text style={s.emptyTxt}>No trips yet</Text>
-            </View>
+            fetchError ? (
+              <View style={s.empty}>
+                <Ionicons name="cloud-offline-outline" size={40} color="#333" />
+                <Text style={s.emptyTxt}>Could not load trips</Text>
+                <Text style={s.emptyHint}>Pull down to retry</Text>
+              </View>
+            ) : (
+              <View style={s.empty}>
+                <Ionicons name="car-outline" size={40} color="#333" />
+                <Text style={s.emptyTxt}>No trips yet</Text>
+              </View>
+            )
           }
         />
       )}
@@ -158,4 +164,5 @@ const s = StyleSheet.create({
   fare:        { fontSize: 16, fontWeight: '700', color: '#F5A623' },
   empty:       { alignItems: 'center', marginTop: 80, gap: 12 },
   emptyTxt:    { color: '#444', fontSize: 15 },
+  emptyHint:   { color: '#333', fontSize: 12, marginTop: 4 },
 });

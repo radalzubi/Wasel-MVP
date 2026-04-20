@@ -79,8 +79,25 @@ router.get('/', async (req, res) => {
       source:       'directions',
     });
   } catch (err) {
-    console.error('[estimate] Directions API error:', err);
-    res.status(502).json({ error: 'Failed to get route estimate' });
+    console.error('[estimate] Directions API error — falling back to haversine:', err);
+    // Fall back to haversine so the rider app always gets a fare estimate
+    const R = 6371;
+    const dLat = ((dropoff_lat - pickup_lat) * Math.PI) / 180;
+    const dLng = ((dropoff_lng - pickup_lng) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos((pickup_lat * Math.PI) / 180) *
+        Math.cos((dropoff_lat * Math.PI) / 180) *
+        Math.sin(dLng / 2) ** 2;
+    const distKm = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const fare = Math.max(1.5, 0.5 + distKm * 0.35);
+    return res.json({
+      fare_jd:      Number(fare.toFixed(2)),
+      distance_km:  Number(distKm.toFixed(1)),
+      duration_min: Math.max(1, Math.round((distKm / 25) * 60)),
+      polyline:     null,
+      source:       'haversine_fallback',
+    });
   }
 });
 

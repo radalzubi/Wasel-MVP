@@ -1172,18 +1172,24 @@ export default function HomeScreen() {
                 </View>
               </View>
 
-              {/* Fare */}
-              {fare && (
-                <View style={s.fareRow}>
-                  <View>
-                    <Text style={s.fareLabel}>{t('estimatedFare')}</Text>
-                    <Text style={s.fareNote}>{t('cashPayment')}</Text>
-                  </View>
-                  <Text style={s.fareAmount}>{fare} JD</Text>
+              {/* Fare — always shown when destination is set; spinner while calculating */}
+              <View style={s.fareRow}>
+                <View>
+                  <Text style={s.fareLabel}>{t('estimatedFare')}</Text>
+                  <Text style={s.fareNote}>{t('cashPayment')}</Text>
                 </View>
-              )}
+                {fare
+                  ? <Text style={s.fareAmount}>{fare} JD</Text>
+                  : <ActivityIndicator size="small" color="#F5A623" />
+                }
+              </View>
 
-              <TouchableOpacity style={s.requestBtn} onPress={handleRequestRide} activeOpacity={0.85}>
+              <TouchableOpacity
+                style={[s.requestBtn, !fare && s.requestBtnDisabled]}
+                onPress={handleRequestRide}
+                disabled={!fare}
+                activeOpacity={0.85}
+              >
                 <Text style={s.requestBtnText}>{t('requestWasel')}</Text>
               </TouchableOpacity>
             </View>
@@ -1480,6 +1486,7 @@ export default function HomeScreen() {
             <TouchableOpacity
               style={[s.ratingSubmitBtn, ratingStars === 0 && s.ratingSubmitBtnDisabled]}
               onPress={() => submitRating(ratingStars)}
+              disabled={ratingStars === 0}
               activeOpacity={0.85}
             >
               <Text style={s.ratingSubmitText}>{ratingStars > 0 ? 'Submit Rating' : 'Rate your driver'}</Text>
@@ -1631,6 +1638,7 @@ const s = StyleSheet.create({
     backgroundColor: '#F5A623', borderRadius: 14,
     paddingVertical: 17, alignItems: 'center',
   },
+  requestBtnDisabled: { opacity: 0.45 },
   requestBtnText: { color: '#000', fontWeight: '700', fontSize: 17 },
 
   // Active trip

@@ -37,11 +37,12 @@ router.post('/', async (req, res) => {
 
 // GET /api/waitlist/count
 router.get('/count', async (_req, res) => {
-  const { count } = await supabase
+  const { count, error } = await supabase
     .from('waitlist')
     .select('*', { count: 'exact', head: true });
 
-  res.json({ count });
+  if (error) return res.status(500).json({ error: 'Failed to fetch count' });
+  res.json({ count: count ?? 0 });
 });
 
 export default router;

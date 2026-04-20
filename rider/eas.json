@@ -1,5 +1,8 @@
 {
-  "cli": { "version": ">= 14.0.0" },
+  "cli": {
+    "version": ">= 14.0.0",
+    "appVersionSource": "remote"
+  },
   "build": {
     "development": {
       "developmentClient": true,
@@ -7,7 +10,7 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://wasel-mvp-production.up.railway.app",
         "EXPO_PUBLIC_SUPABASE_URL": "https://javvotaghswskyuzrgwr.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "<SUPABASE_PUBLISHABLE_KEY>",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "<SUPABASE_ANON_KEY>",
         "EXPO_PUBLIC_WAITLIST_MODE": "false"
       }
     },
@@ -16,7 +19,7 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://wasel-mvp-production.up.railway.app",
         "EXPO_PUBLIC_SUPABASE_URL": "https://javvotaghswskyuzrgwr.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "<SUPABASE_PUBLISHABLE_KEY>",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "<SUPABASE_ANON_KEY>",
         "EXPO_PUBLIC_WAITLIST_MODE": "false"
       }
     },
@@ -29,7 +32,7 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://wasel-mvp-production.up.railway.app",
         "EXPO_PUBLIC_SUPABASE_URL": "https://javvotaghswskyuzrgwr.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "<SUPABASE_PUBLISHABLE_KEY>",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "<SUPABASE_ANON_KEY>",
         "EXPO_PUBLIC_WAITLIST_MODE": "false",
         "GOOGLE_MAPS_API_KEY": "<GOOGLE_MAPS_API_KEY>"
       }
@@ -40,7 +43,7 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://wasel-mvp-production.up.railway.app",
         "EXPO_PUBLIC_SUPABASE_URL": "https://javvotaghswskyuzrgwr.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "<SUPABASE_PUBLISHABLE_KEY>",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "<SUPABASE_ANON_KEY>",
         "EXPO_PUBLIC_WAITLIST_MODE": "false",
         "GOOGLE_MAPS_API_KEY": "<GOOGLE_MAPS_API_KEY>"
       }

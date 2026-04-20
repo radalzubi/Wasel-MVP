@@ -44,11 +44,24 @@ router.patch('/status', requireAuth, requireDriver, async (req: AuthRequest, res
 
   const updates: Record<string, unknown> = { ...parsed.data };
 
-  // P5: When a driver marks themselves as available, stamp became_available_at
-  // so the dispatch engine can calculate real idle-time for BMP scoring.
-  if (parsed.data.is_available === true) {
+  // When going online (is_online=true) without an explicit is_available flag,
+  // also mark the driver as available and stamp became_available_at — otherwise
+  // the dispatch engine will never see them (it filters is_available=true).
+  if (parsed.data.is_online === true && parsed.data.is_available === undefined) {
+    updates.is_available = true;
     updates.became_available_at = new Date().toISOString();
-  } else if (parsed.data.is_available === false) {
+  }
+
+  // When going offline, clear both flags and the availability timestamp.
+  if (parsed.data.is_online === false) {
+    updates.is_available = false;
+    updates.became_available_at = null;
+  }
+
+  // Explicit is_available transitions (standalone or combined with is_online).
+  if (parsed.data.is_available === true && parsed.data.is_online !== false) {
+    updates.became_available_at = new Date().toISOString();
+  } else if (parsed.data.is_available === false && parsed.data.is_online !== false) {
     updates.became_available_at = null;
   }
 
@@ -125,6 +138,10 @@ router.post('/register', requireAuth, async (req: AuthRequest, res) => {
   // Get the phone number from the auth user record.
   const { data: authUser } = await supabase.auth.admin.getUserById(req.userId!);
   const phone = authUser?.user?.phone ?? '';
+  if (!phone) {
+    console.error('[drivers/register] auth user has no phone for userId', req.userId);
+    return res.status(500).json({ error: 'Could not retrieve phone number for this account' });
+  }
 
   const isTestBypassEnabled =
     process.env.NODE_ENV === 'development' ||
@@ -158,8 +175,10 @@ router.post('/register', requireAuth, async (req: AuthRequest, res) => {
   res.status(201).json({ ok: true, status: 'pending_approval' });
 });
 
-// GET /api/drivers/trips — last 20 completed/cancelled trips + earnings summary
+// GET /api/drivers/trips — last 50 completed/cancelled trips for display,
+// plus an earnings summary calculated across ALL completed trips (no limit).
 router.get('/trips', requireAuth, requireDriver, async (req: AuthRequest, res) => {
+  // Fetch the display list (capped at 50 for UI performance)
   const { data, error } = await supabase
     .from('trips')
     .select(`
@@ -169,12 +188,20 @@ router.get('/trips', requireAuth, requireDriver, async (req: AuthRequest, res) =
     .eq('driver_id', req.userId)
     .in('status', ['completed', 'cancelled'])
     .order('created_at', { ascending: false })
-    .limit(20);
+    .limit(50);
 
   if (error) return res.status(500).json({ error: 'Failed to fetch trips' });
 
-  const trips = data ?? [];
-  const completed = trips.filter(t => t.status === 'completed');
+  // Fetch all completed trips (no limit) for accurate total earnings summary.
+  const { data: allCompleted, error: summaryErr } = await supabase
+    .from('trips')
+    .select('fare_amount, completed_at')
+    .eq('driver_id', req.userId)
+    .eq('status', 'completed');
+
+  if (summaryErr) return res.status(500).json({ error: 'Failed to fetch earnings summary' });
+
+  const completed = allCompleted ?? [];
   const totalEarnings = completed.reduce((sum, t) => sum + Number(t.fare_amount ?? 0), 0);
   const today = new Date().toDateString();
   const todayEarnings = completed
@@ -182,7 +209,7 @@ router.get('/trips', requireAuth, requireDriver, async (req: AuthRequest, res) =
     .reduce((sum, t) => sum + Number(t.fare_amount ?? 0), 0);
 
   res.json({
-    trips,
+    trips: data ?? [],
     summary: {
       total_trips:       completed.length,
       total_earnings_jd: Number(totalEarnings.toFixed(2)),

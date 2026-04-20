@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, AppState } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -18,31 +18,35 @@ export default function PendingApprovalScreen() {
     return () => { isMounted.current = false; };
   }, []);
 
+  // Shared approval check — polls the DB once, navigates on approval.
+  const checkApproval = async () => {
+    if (!user?.id) return;
+    try {
+      const { data } = await supabase
+        .from('drivers')
+        .select('is_approved')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (!isMounted.current) return;
+      if (data?.is_approved === true) {
+        router.replace('/(app)/dashboard' as any);
+      }
+    } catch { /* non-fatal */ }
+  };
+
   useEffect(() => {
     if (!user?.id) return;
 
-    // Check immediately in case approval happened between registration and
-    // arriving on this screen (the /register response races with the admin's
-    // SQL UPDATE in rare cases).
-    (async () => {
-      try {
-        const { data } = await supabase
-          .from('drivers')
-          .select('is_approved')
-          .eq('id', user.id)
-          .maybeSingle();
-        if (!isMounted.current) return;
-        if (data?.is_approved === true) {
-          router.replace('/(app)/dashboard' as any);
-        }
-      } catch { /* non-fatal — Realtime subscription below will catch it */ }
-    })();
+    // 1. Check immediately — approval may have arrived between registration
+    //    and this screen mounting (race with admin SQL UPDATE).
+    checkApproval();
 
-    // Subscribe to UPDATE events on this driver's row. When `is_approved`
-    // transitions to true, navigate to the dashboard.
+    // 2. Subscribe to Realtime UPDATE events on this driver's row so we
+    //    navigate the instant `is_approved` flips to true.
     const channelName = `driver-approval-${user.id}`;
+    // Remove any orphaned channel from a prior mount (React Strict Mode, fast nav).
     const existing = supabase.getChannels().find(
-      (c) => c.topic === channelName || c.topic === `realtime:${channelName}`,
+      (c) => c.topic.endsWith(channelName),
     );
     if (existing) {
       try { supabase.removeChannel(existing); } catch { /* ignore */ }
@@ -61,9 +65,24 @@ export default function PendingApprovalScreen() {
       })
       .subscribe();
 
+    // 3. Periodic DB fallback (every 30 s) — catches approvals that arrived
+    //    while the Realtime WebSocket was disconnected (network drop, background
+    //    kill, etc.). Supabase Realtime does NOT re-deliver missed events on
+    //    reconnect, so without this a driver could sit here indefinitely if their
+    //    approval event was missed during a disconnect window.
+    const pollInterval = setInterval(checkApproval, 30_000);
+
+    // 4. Re-check on app foreground — fastest recovery path after background kill.
+    const appStateSub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') checkApproval();
+    });
+
     return () => {
+      clearInterval(pollInterval);
+      appStateSub.remove();
       try { supabase.removeChannel(ch); } catch { /* ignore */ }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
   return (

@@ -53,6 +53,15 @@ export default function DriverVerifyScreen() {
         return;
       }
 
+      // Guard against a backend that returned a session object without tokens
+      // (e.g. a Supabase SDK hiccup on the server side). Without this check
+      // the `access_token` read crashes with a TypeError that looks identical
+      // to a native crash on iOS (no RedBox in a TestFlight build).
+      if (!data.session?.access_token || !data.session?.refresh_token) {
+        Alert.alert('Session error', 'Authentication response was incomplete. Please try again.');
+        return;
+      }
+
       // setSession is an intentional side effect even if the user unmounted:
       // they successfully authenticated and the session should persist.
       // We only gate UI effects (alerts, navigation) on isMounted.

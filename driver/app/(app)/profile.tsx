@@ -7,7 +7,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { supabase } from '../../lib/supabase';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -29,12 +28,15 @@ const TIER: Record<number, { label: string; color: string; bg: string }> = {
   3: { label: 'Platinum', color: '#FFF', bg: '#8B5CF6' },
 };
 
-function formatSince(iso: string) {
-  return new Date(iso).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+function formatSince(iso: string | null | undefined) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 }
 
 export default function ProfileScreen() {
-  const { signOut } = useAuth();
+  const { signOut, authFetch } = useAuth();
   const { t, language, toggleLanguage } = useLanguage();
   const [profile, setProfile] = useState<DriverProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -52,12 +54,7 @@ export default function ProfileScreen() {
   async function load() {
     try {
       setLoading(true); setError(null);
-      const session = await supabase.auth.getSession();
-      const token = session.data.session?.access_token;
-      if (!token) throw new Error('No session');
-      const res = await fetch(`${API_URL}/api/drivers/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch(`${API_URL}/api/drivers/me`);
       if (!isMounted.current) return;
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -123,7 +120,7 @@ export default function ProfileScreen() {
             <Ionicons name="car-outline" size={18} color="#F5A623" />
             <Text style={s.cardLabel}>{t('vehicle')}</Text>
           </View>
-          <Text style={s.vehicleName}>{profile.vehicle_make} {profile.vehicle_model}</Text>
+          <Text style={s.vehicleName}>{[profile.vehicle_make, profile.vehicle_model].filter(Boolean).join(' ') || '—'}</Text>
           <View style={s.plateRow}>
             <Text style={s.plateLabel}>{t('vehiclePlate')}</Text>
             <View style={s.plateBadge}>

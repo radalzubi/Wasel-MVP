@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../contexts/AuthContext';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -26,6 +26,7 @@ interface Summary {
 }
 
 export default function EarningsScreen() {
+  const { authFetch } = useAuth();
   const [trips, setTrips] = useState<TripRecord[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -41,19 +42,14 @@ export default function EarningsScreen() {
   async function load(isRefresh = false) {
     if (isRefresh) setRefreshing(true); else setLoading(true);
     try {
-      const session = await supabase.auth.getSession();
-      const token = session.data.session?.access_token;
-      if (!isMounted.current) return;
-      const res = await fetch(`${API_URL}/api/drivers/trips`, {
-        headers: { Authorization: `Bearer ${token ?? ''}` },
-      });
+      const res = await authFetch(`${API_URL}/api/drivers/trips`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (!isMounted.current) return;
       setTrips(data.trips ?? []);
       setSummary(data.summary ?? null);
     } catch {
-      // Silent — stale data is fine
+      // Silent — stale data is acceptable (summary stays at previous value on pull-to-refresh failure)
     } finally {
       if (isMounted.current) {
         setLoading(false);
@@ -66,8 +62,9 @@ export default function EarningsScreen() {
   const onRefresh = useCallback(() => load(true), []);
 
   function renderItem({ item }: { item: TripRecord }) {
-    const date = new Date(item.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    const time = new Date(item.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    const ts = item.created_at ? new Date(item.created_at) : null;
+    const date = ts ? ts.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
+    const time = ts ? ts.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
     return (
       <View style={s.card}>
         <View style={s.cardLeft}>
