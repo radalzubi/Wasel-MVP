@@ -15,7 +15,10 @@ const workspaceRoot = path.resolve(projectRoot, '..');
 
 const config = getDefaultConfig(projectRoot);
 
-config.watchFolders = [...(config.watchFolders || []), workspaceRoot];
+// Only watch packages/ (shared libs) — NOT the whole workspace root.
+// Watching workspaceRoot includes both node_modules trees (300k+ files)
+// and makes Metro's initial file scan take several minutes.
+config.watchFolders = [...(config.watchFolders || []), path.resolve(workspaceRoot, 'packages')];
 config.resolver.nodeModulesPaths = [
   path.resolve(projectRoot, 'node_modules'),
   path.resolve(workspaceRoot, 'node_modules'),
