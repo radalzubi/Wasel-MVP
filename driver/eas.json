@@ -48,16 +48,16 @@
   "submit": {
     "testflight": {
       "ios": {
-        "appleId": "YOUR_APPLE_ID@email.com",
-        "ascAppId": "YOUR_APP_STORE_CONNECT_DRIVER_APP_ID",
-        "appleTeamId": "YOUR_TEAM_ID"
+        "appleId": "apple-id@example.com",
+        "ascAppId": "6762637977",
+        "appleTeamId": "6JKS4T2LPQ"
       }
     },
     "production": {
       "ios": {
-        "appleId": "YOUR_APPLE_ID@email.com",
-        "ascAppId": "YOUR_APP_STORE_CONNECT_DRIVER_APP_ID",
-        "appleTeamId": "YOUR_TEAM_ID"
+        "appleId": "apple-id@example.com",
+        "ascAppId": "6762637977",
+        "appleTeamId": "6JKS4T2LPQ"
       }
     }
   }
