@@ -1,6 +1,6 @@
 import { supabaseAdmin as supabase } from '../lib/supabase';
 import { haversineKm } from './geo';
-import { bmpScore, DriverCandidate } from './scoring';
+import { bmpScore, DriverCandidate, TIER_RADIUS_KM } from './scoring';
 import { sendPush } from '../lib/push';
 
 const OFFER_TIMEOUT_SECONDS  = 15;
@@ -69,7 +69,7 @@ export async function dispatchTrip(
   // location_lat / location_lng are plain float columns — always safe for JS arithmetic.
   const { data: drivers, error } = await supabase
     .from('drivers')
-    .select('id, location_lat, location_lng, subscription_tier, activity_score, became_available_at')
+    .select('id, location_lat, location_lng, subscription_tier, activity_score, became_available_at, average_rating')
     .eq('is_online', true)
     .eq('is_available', true)
     .eq('is_approved', true);
@@ -105,11 +105,13 @@ export async function dispatchTrip(
     .map((d) => {
       if (d.location_lat == null || d.location_lng == null) return null;
       const distKm = haversineKm(pickupLat, pickupLng, d.location_lat, d.location_lng);
-      if (distKm > EFFECTIVE_RADIUS_KM) return null;
-
-      // P5: Effective tier = active subscription tier if present,
-      //     otherwise fall back to the column value (admin-set default).
       const effectiveTier = (activeSubTier.get(d.id) ?? d.subscription_tier ?? 1) as 1 | 2 | 3;
+
+      // In dev/test mode EFFECTIVE_RADIUS_KM is 99_999 — bypass tier radius too.
+      const tierRadius = EFFECTIVE_RADIUS_KM < 10_000
+        ? (TIER_RADIUS_KM[effectiveTier] ?? TIER_RADIUS_KM[0])
+        : EFFECTIVE_RADIUS_KM;
+      if (distKm > tierRadius) return null;
 
       // P5: Real idle time derived from became_available_at instead of the
       //     stale idle_time_minutes column that was never updated.
@@ -122,6 +124,7 @@ export async function dispatchTrip(
         subscription_tier: effectiveTier,
         activity_score:    d.activity_score ?? 0.5,
         idle_time_minutes: idleMinutes,
+        average_rating:    d.average_rating ?? 5.0,
       };
 
       return { driverId: d.id, score: bmpScore(candidate, distKm) };
