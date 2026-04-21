@@ -62,12 +62,13 @@ echo "   ✓ Done"
 # ── Fix: patch Podfile before pod install ─────────────────────────────────────
 # expo-notifications registers two CocoaPods targets that both try to build
 # the same ExpoNotifications_privacy.bundle, causing "Multiple commands produce"
-# error. We disable SKIP_INSTALL on the legacy EXNotifications variant so only
-# the canonical ExpoNotifications target produces the bundle.
-cat >> "$APP_DIR/ios/Podfile" <<'RUBY'
-
-# ship.sh patch — fix duplicate ExpoNotifications privacy bundle
-post_install do |installer|
+# error. We inject the fix inside the existing post_install block (CocoaPods
+# does not allow multiple post_install blocks).
+python3 - "$APP_DIR/ios/Podfile" <<'PYEOF'
+import sys
+path = sys.argv[1]
+fix = """
+  # ship.sh: disable duplicate ExpoNotifications privacy bundle target
   installer.pods_project.targets.each do |target|
     if target.name == 'EXNotifications-ExpoNotifications_privacy'
       target.build_configurations.each do |config|
@@ -75,8 +76,15 @@ post_install do |installer|
       end
     end
   end
-end
-RUBY
+"""
+with open(path) as f:
+    content = f.read()
+marker = 'post_install do |installer|'
+if marker in content and 'EXNotifications-ExpoNotifications_privacy' not in content:
+    content = content.replace(marker, marker + fix, 1)
+    with open(path, 'w') as f:
+        f.write(content)
+PYEOF
 
 # ── Step 2: Pod install ────────────────────────────────────────────────────────
 echo ""
