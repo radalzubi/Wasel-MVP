@@ -33,26 +33,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     // Prime tokenRef, session, user, and loading from storage immediately.
-    // This guarantees setLoading(false) is called even if onAuthStateChange
-    // fires TOKEN_REFRESHED as the first event (token expired at startup),
-    // which has an early return that skips setLoading — without this call the
-    // app would hang on the loading spinner until iOS watchdog kills it (~20s).
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      tokenRef.current = session?.access_token ?? null;
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
+    // See rider/contexts/AuthContext.tsx for full rationale; the .catch()
+    // below prevents an unhandled promise rejection AND a stuck loading
+    // spinner if AsyncStorage rejects or the SDK errors during deserialise.
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        tokenRef.current = session?.access_token ?? null;
+        setSession(session);
+        setUser(session?.user ?? null);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.warn('[AuthContext] getSession rejected — treating as signed-out:', err);
+        tokenRef.current = null;
+        setSession(null);
+        setUser(null);
+        setLoading(false);
+      });
 
+    // Handler wrapped in try/catch so a synchronous throw cannot leak to the
+    // Supabase SDK's internal event emitter and crash the JS runtime.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, nextSession) => {
-      tokenRef.current = nextSession?.access_token ?? null;
-      if (event === 'TOKEN_REFRESHED') {
+      try {
+        tokenRef.current = nextSession?.access_token ?? null;
+        if (event === 'TOKEN_REFRESHED') {
+          setSession(nextSession);
+          return;
+        }
         setSession(nextSession);
-        return;
+        setUser(nextSession?.user ?? null);
+        setLoading(false);
+      } catch (err) {
+        console.warn('[AuthContext] onAuthStateChange handler threw:', err);
+        setLoading(false);
       }
-      setSession(nextSession);
-      setUser(nextSession?.user ?? null);
-      setLoading(false);
     });
 
     return () => subscription.unsubscribe();

@@ -50,26 +50,54 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // fires TOKEN_REFRESHED as the first event (token expired at startup),
     // which has an early return that skips setLoading — without this call the
     // app would hang on the loading spinner until iOS watchdog kills it (~20s).
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      tokenRef.current = session?.access_token ?? null;
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
+    //
+    // .catch() is CRITICAL: AsyncStorage corruption, SDK errors during
+    // deserialisation, or a rejected storage read would otherwise become an
+    // unhandled promise rejection AND leave setLoading(false) unreached,
+    // which is the exact "hang → watchdog kill" crash surface we keep
+    // chasing. On rejection we treat it as "no session" and proceed to
+    // the signed-out path so index.tsx can route to /login.
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        tokenRef.current = session?.access_token ?? null;
+        setSession(session);
+        setUser(session?.user ?? null);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.warn('[AuthContext] getSession rejected — treating as signed-out:', err);
+        tokenRef.current = null;
+        setSession(null);
+        setUser(null);
+        setLoading(false);
+      });
 
     // Keep ref + state in sync with every subsequent auth event.
     // TOKEN_REFRESHED only rotates the JWT — update tokenRef and session but
     // skip setUser so [user?.id]-keyed effects don't re-run hourly (prevents
     // push-token churn, profile re-fetch, etc.).
+    //
+    // The handler body is wrapped in try/catch — a synchronous throw inside
+    // a Supabase auth listener propagates up through the SDK's internal
+    // event emitter and can take the JS runtime down. In 99% of cases the
+    // only thing that can throw is a malformed nextSession object; our
+    // handler only reads primitives off it, but the guard is still cheap
+    // and removes any possibility of this failure mode.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, nextSession) => {
-      tokenRef.current = nextSession?.access_token ?? null;
-      if (event === 'TOKEN_REFRESHED') {
+      try {
+        tokenRef.current = nextSession?.access_token ?? null;
+        if (event === 'TOKEN_REFRESHED') {
+          setSession(nextSession);
+          return;
+        }
         setSession(nextSession);
-        return;
+        setUser(nextSession?.user ?? null);
+        setLoading(false);
+      } catch (err) {
+        console.warn('[AuthContext] onAuthStateChange handler threw:', err);
+        // Fail safe: clear loading so we don't hang on the spinner.
+        setLoading(false);
       }
-      setSession(nextSession);
-      setUser(nextSession?.user ?? null);
-      setLoading(false);
     });
 
     return () => subscription.unsubscribe();
