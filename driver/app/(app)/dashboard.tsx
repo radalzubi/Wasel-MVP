@@ -41,6 +41,54 @@ function finiteLatLng(
   return { latitude: lat, longitude: lng };
 }
 
+// Live-trip map tunables. Mirror rider/app/(app)/home.tsx exactly.
+const MAP_MIN_FIT_KM = 0.02;  // 20 m — sub-meter zoom crashes iOS GMSMapView
+const MAP_MAX_FIT_KM = 200;   // cross-continent fit spans the globe
+
+// Use native Apple Maps on iOS, Google on Android. See rider/app/(app)/home.tsx
+// for the rationale (GMSMapView iOS SDK is a main-thread hang risk under the
+// rapid state churn a live trip produces; MKMapView is native and much more
+// stable). Expo Go has a fixed binary with MKMapView only.
+const MAP_PROVIDER =
+  Platform.OS === 'ios' || IS_EXPO_GO ? undefined : PROVIDER_GOOGLE;
+
+// Module-scope styles used by memoized markers — must not close over render-
+// scope variables.
+const markerStyles = StyleSheet.create({
+  selfDot: {
+    width: 20, height: 20, borderRadius: 10,
+    backgroundColor: '#4CAF50',
+    borderWidth: 3, borderColor: 'rgba(76,175,80,0.28)',
+  },
+  selfDotInner: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FFF' },
+});
+
+// Memoized map children. JSX reconciliation skips these when the coord
+// reference hasn't changed → no native `updateView` bridge call → main
+// thread stays free. tracksViewChanges={false} on the custom-view self
+// marker is the single most important iOS stability knob for live trips.
+const SelfMarker = React.memo(function SelfMarker(
+  { coord }: { coord: { latitude: number; longitude: number } },
+) {
+  return (
+    <Marker coordinate={coord} tracksViewChanges={false} anchor={{ x: 0.5, y: 0.5 }}>
+      <View style={markerStyles.selfDot}>
+        <View style={markerStyles.selfDotInner} />
+      </View>
+    </Marker>
+  );
+});
+const PickupMarker = React.memo(function PickupMarker(
+  { coord }: { coord: { latitude: number; longitude: number } },
+) {
+  return <Marker coordinate={coord} title="Pickup" pinColor="#F5A623" />;
+});
+const DropoffMarker = React.memo(function DropoffMarker(
+  { coord }: { coord: { latitude: number; longitude: number } },
+) {
+  return <Marker coordinate={coord} title="Dropoff" pinColor="#4CAF50" />;
+});
+
 function openNavigation(lat: number, lng: number) {
   // Guard against null/0/NaN coordinates (can happen if backend omits geocoding)
   if (!isFinite(lat) || !isFinite(lng) || (lat === 0 && lng === 0)) return;
@@ -586,19 +634,21 @@ export default function DashboardScreen() {
               currentLoc != null &&
               isFinite(currentLoc.latitude) && isFinite(currentLoc.longitude);
 
-            // Only fit both points if the driver is within 200 km of pickup.
-            // Otherwise fitToCoordinates would span the globe and produce an
-            // extreme zoom-out that has been observed to crash MapView
-            // natively on both iOS and Android.
-            const nearPickup =
-              driverLocValid &&
-              haversineKm(
-                currentLoc.latitude, currentLoc.longitude,
-                safePickup.latitude, safePickup.longitude,
-              ) < 200;
+            // Three regimes: if distance from current GPS to pickup is out of
+            // band (cross-continent OR essentially-the-same-point) we centre
+            // on the pickup at a fixed sane zoom instead of calling
+            // fitToCoordinates, which overzooms / overzooms-out in those two
+            // cases and has been tied to iOS GMSMapView native aborts.
+            const distKm = driverLocValid
+              ? haversineKm(
+                  currentLoc.latitude, currentLoc.longitude,
+                  safePickup.latitude, safePickup.longitude,
+                )
+              : Infinity;
+            const fitOk = driverLocValid && distKm >= MAP_MIN_FIT_KM && distKm <= MAP_MAX_FIT_KM;
 
             try {
-              if (nearPickup && driverLocValid) {
+              if (fitOk && driverLocValid) {
                 mapRef.current.fitToCoordinates(
                   [currentLoc, safePickup],
                   {
@@ -1025,57 +1075,64 @@ export default function DashboardScreen() {
       <MapView
         ref={mapRef}
         style={styles.map}
-        provider={IS_EXPO_GO ? undefined : PROVIDER_GOOGLE}
+        provider={MAP_PROVIDER}
         initialRegion={{ ...AMMAN, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
         showsUserLocation={false}
-        // customMapStyle applied only on Android. On iOS under PROVIDER_GOOGLE
-        // the large style JSON gets serialised across the bridge on every
-        // re-render and has been observed to trigger MapView native aborts
-        // during rapid state churn (trip restore + live updates). Android's
-        // native Google Maps SDK handles style JSON as a first-class arg and
-        // is stable. Styled iOS is a future nice-to-have, not a release goal.
+        // customMapStyle only applies under PROVIDER_GOOGLE. With Apple Maps
+        // on iOS (MAP_PROVIDER === undefined) this prop is ignored natively.
         customMapStyle={Platform.OS === 'android' && !IS_EXPO_GO ? DARK_MAP_STYLE : undefined}
         onMapReady={() => setMapReady(true)}
       >
         {/* Gate ALL map children on mapReady — adding Markers/Polylines before
             the native map layer fires onMapReady causes native crashes. */}
-        {mapReady && location && (
-          <Marker coordinate={location}>
-            <View style={styles.driverMarker}><View style={styles.driverMarkerDot} /></View>
-          </Marker>
-        )}
+        {mapReady && location && <SelfMarker coord={location} />}
         {mapReady && tripDetails?.pickup_lat != null && tripDetails?.pickup_lng != null && (
-          <Marker
-            coordinate={{ latitude: tripDetails.pickup_lat, longitude: tripDetails.pickup_lng }}
-            title="Pickup" pinColor="#F5A623"
-          />
+          <PickupMarker coord={{ latitude: tripDetails.pickup_lat, longitude: tripDetails.pickup_lng }} />
         )}
         {mapReady && currentTrip?.status === 'in_progress' &&
           tripDetails?.dropoff_lat != null && tripDetails?.dropoff_lng != null && (
-          <Marker
-            coordinate={{ latitude: tripDetails.dropoff_lat, longitude: tripDetails.dropoff_lng }}
-            title="Dropoff" pinColor="#4CAF50"
-          />
+          <DropoffMarker coord={{ latitude: tripDetails.dropoff_lat, longitude: tripDetails.dropoff_lng }} />
         )}
+        {/* driver→pickup polyline — distance-gated to avoid over/under-zoom
+            GMSPolyline aborts on iOS. */}
         {mapReady && location &&
           tripDetails?.pickup_lat != null && tripDetails?.pickup_lng != null &&
-          (currentTrip?.status === 'accepted' || currentTrip?.status === 'en_route') && (
-          <Polyline
-            coordinates={[location, { latitude: tripDetails.pickup_lat, longitude: tripDetails.pickup_lng }]}
-            strokeColor="#F5A623" strokeWidth={3} lineDashPattern={[6, 3]}
-          />
-        )}
+          (currentTrip?.status === 'accepted' || currentTrip?.status === 'en_route') &&
+          (() => {
+            const km = haversineKm(
+              location.latitude, location.longitude,
+              tripDetails.pickup_lat, tripDetails.pickup_lng,
+            );
+            if (km > MAP_MAX_FIT_KM || km < MAP_MIN_FIT_KM) return null;
+            return (
+              <Polyline
+                coordinates={[location, { latitude: tripDetails.pickup_lat, longitude: tripDetails.pickup_lng }]}
+                strokeColor="#F5A623" strokeWidth={3} lineDashPattern={[6, 3]}
+              />
+            );
+          })()
+        }
+        {/* pickup→dropoff polyline — same distance gate. */}
         {mapReady && currentTrip?.status === 'in_progress' &&
           tripDetails?.pickup_lat != null && tripDetails?.pickup_lng != null &&
-          tripDetails?.dropoff_lat != null && tripDetails?.dropoff_lng != null && (
-          <Polyline
-            coordinates={[
-              { latitude: tripDetails.pickup_lat,  longitude: tripDetails.pickup_lng },
-              { latitude: tripDetails.dropoff_lat, longitude: tripDetails.dropoff_lng },
-            ]}
-            strokeColor="#4CAF50" strokeWidth={3} lineDashPattern={[8, 4]}
-          />
-        )}
+          tripDetails?.dropoff_lat != null && tripDetails?.dropoff_lng != null &&
+          (() => {
+            const km = haversineKm(
+              tripDetails.pickup_lat, tripDetails.pickup_lng,
+              tripDetails.dropoff_lat, tripDetails.dropoff_lng,
+            );
+            if (km > MAP_MAX_FIT_KM || km < MAP_MIN_FIT_KM) return null;
+            return (
+              <Polyline
+                coordinates={[
+                  { latitude: tripDetails.pickup_lat,  longitude: tripDetails.pickup_lng },
+                  { latitude: tripDetails.dropoff_lat, longitude: tripDetails.dropoff_lng },
+                ]}
+                strokeColor="#4CAF50" strokeWidth={3} lineDashPattern={[8, 4]}
+              />
+            );
+          })()
+        }
       </MapView>
       )}
 

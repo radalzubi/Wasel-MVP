@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { InteractionManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -175,4 +176,87 @@ export function useStartupHealth(): {
   };
 
   return { bootState, shouldSkipRestore: skipRestore, markBootstrapDone, exitRecoveryMode };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// JS-thread heartbeat
+//
+// Scope: this detects JS thread stalls only. It CANNOT detect iOS UI-thread
+// hangs (those are the ones that cause watchdog kills on real devices — JS
+// can still run while the UI thread is blocked in native map code). But JS
+// stalls do happen:
+//   - long synchronous work (huge PolylineDecoder runs, deeply nested
+//     reconciliations, JSON.parse on very large bodies)
+//   - garbage collection pauses under memory pressure
+//   - misuse of setInterval/setTimeout cascades
+// When the JS thread stalls we lose Realtime CDC handlers, subscribe
+// callbacks, and navigation — the same symptom cluster as a native hang.
+// So detecting and recovering from JS stalls is still worth doing.
+//
+// Mechanism: we schedule a setInterval that ticks every 1s. If two ticks
+// fire more than STALL_THRESHOLD_MS apart, we know the JS thread blocked
+// between them. We call the caller's `onStall` so it can tear down heavy
+// subscriptions / re-mount the map / bump a reconnect epoch. Not a magic
+// cure, but often enough to unstick the app vs. letting the watchdog kill it.
+//
+// Using InteractionManager.runAfterInteractions to start the heartbeat so
+// we don't compete for the first-paint frame budget on cold start.
+// ────────────────────────────────────────────────────────────────────────────
+
+const HEARTBEAT_TICK_MS = 1000;
+const STALL_THRESHOLD_MS = 3000;  // 3 consecutive tick intervals missed
+
+export function useJSHeartbeat(onStall: (stallDurationMs: number) => void): void {
+  // onStall ref mirror so we don't restart the interval on every render of the
+  // caller when they pass a fresh closure.
+  const onStallRef = useRef(onStall);
+  useEffect(() => { onStallRef.current = onStall; }, [onStall]);
+
+  useEffect(() => {
+    let lastTick = Date.now();
+    let stallReported = false;
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    const task = InteractionManager.runAfterInteractions(() => {
+      lastTick = Date.now();
+      interval = setInterval(() => {
+        const now = Date.now();
+        const delta = now - lastTick;
+        lastTick = now;
+        if (delta > STALL_THRESHOLD_MS) {
+          // Fire ONCE per stall event (until a healthy tick resets).
+          if (!stallReported) {
+            stallReported = true;
+            try { onStallRef.current(delta); } catch { /* swallow */ }
+          }
+        } else {
+          stallReported = false;
+        }
+      }, HEARTBEAT_TICK_MS);
+    });
+
+    return () => {
+      task.cancel();
+      if (interval) clearInterval(interval);
+    };
+  }, []);
+}
+
+// Convenience: return a stable callback that increments a "recovery epoch"
+// state. Pair with useJSHeartbeat(onStall) where onStall = bumpRecoveryEpoch.
+// The returned epoch goes into useEffect dep arrays of heavy live-trip
+// subscriptions; when it bumps, all those effects clean up + re-create,
+// which often unsticks a stuck Realtime channel or orphaned map timer.
+export function useRecoveryEpoch(): {
+  recoveryEpoch: number;
+  bumpRecoveryEpoch: (stallMs?: number) => void;
+} {
+  const [recoveryEpoch, setRecoveryEpoch] = useState(0);
+  const bumpRecoveryEpoch = useCallback((stallMs?: number) => {
+    if (stallMs != null) {
+      console.warn(`[heartbeat] JS thread stalled ${stallMs}ms — bumping recovery epoch`);
+    }
+    setRecoveryEpoch((n) => n + 1);
+  }, []);
+  return { recoveryEpoch, bumpRecoveryEpoch };
 }

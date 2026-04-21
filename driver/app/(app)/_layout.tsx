@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { View, ActivityIndicator } from 'react-native';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ErrorBoundary, RecoveryShell, useStartupHealth } from '@wasel/shared';
+import { ErrorBoundary, RecoveryShell, useStartupHealth, useJSHeartbeat } from '@wasel/shared';
 
 // See rider/app/(app)/_layout.tsx for detailed rationale. Same breaker,
 // different appName so the recovery UI is unambiguous.
@@ -23,6 +23,11 @@ export default function AppLayout() {
   // bottom inset = home-indicator height (34pt on iPhone X+, 0 on older/Android)
   const { bottom } = useSafeAreaInsets();
   const health = useStartupHealth();
+
+  // See rider (app)/_layout.tsx for the heartbeat rationale.
+  useJSHeartbeat((stallMs) => {
+    console.warn(`[driver] JS thread stalled ${stallMs}ms`);
+  });
 
   if (health.bootState === 'recovery') {
     return <RecoveryShell appName="Wasel Driver" onContinue={health.exitRecoveryMode} />;

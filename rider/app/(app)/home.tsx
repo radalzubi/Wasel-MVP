@@ -49,6 +49,63 @@ function finiteLatLng(
   return { latitude: lat, longitude: lng };
 }
 
+// Live-trip map tunables. Centralised so the driver app can mirror exactly.
+const MAP_MIN_FIT_KM   = 0.02;  // 20 m — below this, fitToCoordinates overzooms and crashes iOS
+const MAP_MAX_FIT_KM   = 200;   // above this the fit would span the globe (cross-continent testing)
+const DRIVER_MIN_MOVE_M = 5;    // below this, skip setDriverLocation to cut re-render rate
+
+// Use native Apple Maps on iOS. The Google Maps iOS SDK (GMSMapView) has
+// repeatedly shown native-thread hangs under rapid state churn — custom-view
+// markers, frequent coord updates, and style-JSON bridging are all rough
+// edges. On iOS we fall through to MKMapView (provider=undefined) which is
+// native, uses far less memory, and handles our workload without issue.
+// Android continues to use PROVIDER_GOOGLE — on Android the Google SDK is
+// itself the native SDK and is stable.
+// Expo Go has a fixed binary that bundles MKMapView-equivalent only, so
+// provider must be undefined there.
+const MAP_PROVIDER =
+  Platform.OS === 'ios' || IS_EXPO_GO ? undefined : PROVIDER_GOOGLE;
+
+// Module-scope styles for memoized map children (must not depend on props).
+const markerStyles = StyleSheet.create({
+  driverDot: {
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: '#F5A623',
+    justifyContent: 'center', alignItems: 'center',
+    borderWidth: 2, borderColor: '#0A0A0A',
+  },
+});
+
+// React.memo'd Markers so JSX reconciliation doesn't send a native
+// `updateView` bridge call every time the parent re-renders. The Marker only
+// actually re-renders when its coord changes.
+//
+// `tracksViewChanges={false}` on the driver Marker is the single most
+// important iOS stability knob: without it, every coord update re-snapshots
+// the custom <View> to a native UIImage on the main thread. With it, the
+// icon renders once and stays stable as the Marker repositions.
+const PickupMarker = React.memo(function PickupMarker(
+  { coord }: { coord: { latitude: number; longitude: number } },
+) {
+  return <Marker coordinate={coord} title="Pickup" pinColor="#F5A623" />;
+});
+const DropoffMarker = React.memo(function DropoffMarker(
+  { coord }: { coord: { latitude: number; longitude: number } },
+) {
+  return <Marker coordinate={coord} title="Dropoff" pinColor="#4CAF50" />;
+});
+const DriverMarker = React.memo(function DriverMarker(
+  { coord }: { coord: { latitude: number; longitude: number } },
+) {
+  return (
+    <Marker coordinate={coord} title="Driver" tracksViewChanges={false}>
+      <View style={markerStyles.driverDot}>
+        <Ionicons name="car" size={14} color="#FFF" />
+      </View>
+    </Marker>
+  );
+});
+
 type TripStatus =
   | 'idle' | 'searching' | 'dispatching'
   | 'accepted' | 'en_route' | 'arrived'
@@ -110,6 +167,10 @@ export default function HomeScreen() {
   // Set to null immediately in resetTripState() — before any awaits resolve — so a
   // subscribe() callback that was in-flight during a reset will see null and bail out.
   const currentTripIdRef = useRef<string | null>(null);
+  // Mirrors driverLocation so the subscription-commit path can compute
+  // "have we moved 5 m since the last committed sample" without depending on
+  // a state closure. Kept in sync inside commitDriverLocation.
+  const driverLocationRef = useRef<{ latitude: number; longitude: number } | null>(null);
 
   // ── Map ready guard ──────────────────────────────────────────────────
   // React Native Maps can crash if Markers/Polylines are added to the native
@@ -605,9 +666,39 @@ export default function HomeScreen() {
   }, [tripId, reconnectTick]);
 
   // ── Live driver location subscription ────────────────────────────────
+  //
+  // Subscribe lifecycle: tied to driverId ONLY, NOT tripStatus. Having
+  // tripStatus in the dep array made the effect tear down and resubscribe on
+  // every status transition (accepted→en_route→arrived→in_progress), i.e.
+  // four WebSocket churn cycles per trip on real iOS. The channel filter is
+  // driverId, so once it's set the sub is valid for the whole live-trip
+  // window. When the trip ends, resetTripState() synchronously nulls
+  // driverId, which triggers cleanup here — no status-based gate needed.
+  //
+  // commitDriverLocation: centralises the finite + (0,0) + 5m-movement
+  // guards. Every incoming GPS update from either the CDC push or the
+  // subscribe-time catchup fetch goes through this one function.
   useEffect(() => {
     if (!driverId) return;
-    if (['idle', 'searching', 'completed', 'cancelled'].includes(tripStatus)) return;
+
+    const commitDriverLocation = (rawLat: unknown, rawLng: unknown): void => {
+      const safe = finiteLatLng(rawLat, rawLng);
+      if (!safe) return;
+      // Movement threshold: if the driver hasn't moved at least
+      // DRIVER_MIN_MOVE_M metres since the last commit, skip setState. This
+      // cuts the live-trip re-render rate from every GPS ping (~10s) down to
+      // only meaningful movement, which is what actually needs the map to
+      // update.
+      const prev = driverLocationRef.current;
+      if (prev) {
+        const movedKm = haversineKm(
+          prev.latitude, prev.longitude, safe.latitude, safe.longitude,
+        );
+        if (movedKm * 1000 < DRIVER_MIN_MOVE_M) return;
+      }
+      driverLocationRef.current = safe;
+      setDriverLocation(safe);
+    };
 
     // Deduplication: remove any stale channel for this driver before creating a new one
     const driverLocChannelName = `driver-loc-${driverId}`;
@@ -628,12 +719,7 @@ export default function HomeScreen() {
           if (!isMounted.current) return;
           // Bail out if the trip was reset between the CDC event arriving and now
           if (currentTripIdRef.current === null) return;
-          const lat = payload.new.location_lat as number | null;
-          const lng = payload.new.location_lng as number | null;
-          // Validate coordinates: NaN/Infinity from GPS transition would crash MapView
-          if (lat != null && lng != null && isFinite(lat) && isFinite(lng)) {
-            setDriverLocation({ latitude: lat, longitude: lng });
-          }
+          commitDriverLocation(payload.new.location_lat, payload.new.location_lng);
         } catch (err) {
           console.error('[driver-loc-sub] payload error:', err);
         }
@@ -649,13 +735,7 @@ export default function HomeScreen() {
           // Verify the trip is still active after the async DB fetch resolves
           if (currentTripIdRef.current !== capturedTripId) return;
           if (!isMounted.current) return;
-          // Validate coordinates before setting state — invalid coords crash MapView
-          if (
-            data?.location_lat != null && data?.location_lng != null &&
-            isFinite(data.location_lat) && isFinite(data.location_lng)
-          ) {
-            setDriverLocation({ latitude: data.location_lat, longitude: data.location_lng });
-          }
+          commitDriverLocation(data?.location_lat, data?.location_lng);
         } catch (err) {
           console.error('[driver-loc-sub] subscribe fetch error:', err);
         }
@@ -663,7 +743,7 @@ export default function HomeScreen() {
     return () => {
       try { supabase.removeChannel(ch); } catch { /* ignore — channel may already be gone */ }
     };
-  }, [driverId, tripStatus, reconnectTick]);
+  }, [driverId, reconnectTick]);
 
   // ── Fetch driver name, phone, and vehicle when driverId becomes known ───
   useEffect(() => {
@@ -696,36 +776,38 @@ export default function HomeScreen() {
     const now = Date.now();
     if (now - lastFitRef.current < 5000) return;
     lastFitRef.current = now;
-    // Only fit both points when the driver is within 200 km of the pickup.
-    // If the driver's GPS is in a different country (e.g., during overseas
-    // testing) fitToCoordinates would span the globe, zoom the map to level 0,
-    // and either crash the native layer or show a blank screen.
-    const driverNearPickup =
-      haversineKm(driverLocation.latitude, driverLocation.longitude,
-                  pickupCoords.latitude,   pickupCoords.longitude) < 200;
+    const distKm = haversineKm(
+      driverLocation.latitude, driverLocation.longitude,
+      pickupCoords.latitude,   pickupCoords.longitude,
+    );
+    // Three regimes, only the middle one does a two-point fit:
+    //   > MAX  driver in a different country (cross-continent testing etc.)
+    //          — fitToCoordinates would span the globe + overzoom out;
+    //          instead centre on pickup only.
+    //   < MIN  driver is essentially AT the pickup. Calling fitToCoordinates
+    //          on two near-identical points tells GMSMapView to compute a
+    //          zoom level past the max (~20), which on iOS Google Maps SDK
+    //          is a known native hang/abort path. Centre on pickup at a
+    //          fixed readable zoom instead.
+    //   else   two-point fit is safe.
     const savedTripId = currentTripIdRef.current;
     const t = setTimeout(() => {
       if (!isMounted.current) return;
       if (!mapReadyRef.current || !mapRef.current) return;
-      // Guard against a trip change during the 500 ms delay — firing a fit on
-      // a stale trip's coords would snap the map to a trip that's no longer
-      // on screen, and in some real-device traces has correlated with the
-      // reopen-crash-loop.
       if (currentTripIdRef.current !== savedTripId) return;
       try {
-        if (driverNearPickup) {
-          mapRef.current.fitToCoordinates([driverLocation, pickupCoords], {
-            edgePadding: { top: 100, right: 60, bottom: 380, left: 60 },
-            animated: true,
-          });
-        } else {
-          // Driver is far away — just centre on the pickup so the map stays usable.
+        if (distKm > MAP_MAX_FIT_KM || distKm < MAP_MIN_FIT_KM) {
           mapRef.current.animateToRegion({
             latitude: pickupCoords.latitude,
             longitude: pickupCoords.longitude,
             latitudeDelta: 0.02,
             longitudeDelta: 0.02,
           }, 600);
+        } else {
+          mapRef.current.fitToCoordinates([driverLocation, pickupCoords], {
+            edgePadding: { top: 100, right: 60, bottom: 380, left: 60 },
+            animated: true,
+          });
         }
       } catch (e) {
         console.warn('[home] driver-fit rejected:', e);
@@ -1130,38 +1212,46 @@ export default function HomeScreen() {
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
-        provider={IS_EXPO_GO ? undefined : PROVIDER_GOOGLE}
+        // MAP_PROVIDER: Apple Maps on iOS (native MKMapView, stable under
+        // rapid state churn), Google on Android (native SDK). See module-top
+        // comment.
+        provider={MAP_PROVIDER}
         initialRegion={{ ...AMMAN, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
         showsUserLocation={showUserLocation}
         showsMyLocationButton={false}
-        // customMapStyle: Android only. On iOS under PROVIDER_GOOGLE the large
-        // style JSON crosses the bridge on every re-render and has been tied
-        // to native MapView aborts during rapid state churn. See driver
-        // dashboard for the same treatment.
+        // customMapStyle only applies under PROVIDER_GOOGLE. With Apple Maps
+        // on iOS (MAP_PROVIDER === undefined) this prop is ignored natively.
         customMapStyle={Platform.OS === 'android' && !IS_EXPO_GO ? DARK_MAP_STYLE : undefined}
         onMapReady={() => setMapReady(true)}
       >
         {/* Gate ALL map children on mapReady — adding Markers/Polylines before the
             native map layer fires onMapReady causes a native crash on Android and
             intermittent crashes on iOS, especially during rapid state transitions. */}
-        {mapReady && pickupCoords && <Marker coordinate={pickupCoords} title="Pickup" pinColor="#F5A623" />}
-        {mapReady && dropoffCoords && <Marker coordinate={dropoffCoords} title="Dropoff" pinColor="#4CAF50" />}
+        {mapReady && pickupCoords && <PickupMarker coord={pickupCoords} />}
+        {mapReady && dropoffCoords && <DropoffMarker coord={dropoffCoords} />}
         {mapReady && driverLocation && ['accepted', 'en_route', 'arrived', 'in_progress'].includes(tripStatus) && (
-          <Marker coordinate={driverLocation} title="Driver">
-            <View style={s.driverMarker}>
-              <Ionicons name="car" size={14} color="#FFF" />
-            </View>
-          </Marker>
+          <DriverMarker coord={driverLocation} />
         )}
-        {/* Route line: driver→pickup while approaching; pickup→dropoff otherwise */}
-        {mapReady && (driverLocation && (tripStatus === 'accepted' || tripStatus === 'en_route') && pickupCoords ? (
-          <Polyline
-            coordinates={[driverLocation, pickupCoords]}
-            strokeColor="#F5A623"
-            strokeWidth={3}
-            lineDashPattern={[6, 3]}
-          />
-        ) : (pickupCoords && dropoffCoords && (
+        {/* Route line: driver→pickup while approaching; pickup→dropoff otherwise.
+            Distance-gated — a line spanning hundreds of km (cross-continent
+            testing) or collapsing to a single point (driver AT pickup) has
+            triggered native GMSPolyline aborts on iOS. Skip rendering
+            entirely in those regimes; the markers alone tell the story. */}
+        {mapReady && (driverLocation && (tripStatus === 'accepted' || tripStatus === 'en_route') && pickupCoords && (() => {
+          const kmDriverToPickup = haversineKm(
+            driverLocation.latitude, driverLocation.longitude,
+            pickupCoords.latitude, pickupCoords.longitude,
+          );
+          if (kmDriverToPickup > MAP_MAX_FIT_KM || kmDriverToPickup < MAP_MIN_FIT_KM) return null;
+          return (
+            <Polyline
+              coordinates={[driverLocation, pickupCoords]}
+              strokeColor="#F5A623"
+              strokeWidth={3}
+              lineDashPattern={[6, 3]}
+            />
+          );
+        })() || (pickupCoords && dropoffCoords && (
           routePolyline ? (() => {
             // decode() can throw on malformed strings and returns NaN coordinates
             // on truncated data — both crash Android's native MapView layer.

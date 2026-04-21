@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { View, ActivityIndicator } from 'react-native';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ErrorBoundary, RecoveryShell, useStartupHealth } from '@wasel/shared';
+import { ErrorBoundary, RecoveryShell, useStartupHealth, useJSHeartbeat } from '@wasel/shared';
 
 // Context exposing the startup-health hook so tab screens (home.tsx, etc.)
 // can call markBootstrapDone() after their own bootstrap and read
@@ -26,6 +26,18 @@ export default function AppLayout() {
   const { t } = useLanguage();
   const { bottom } = useSafeAreaInsets();
   const health = useStartupHealth();
+
+  // JS-thread heartbeat. On a stall longer than the threshold (3s) this
+  // fires — we log it and, if the stall looks like a crash-precursor,
+  // the user's app isn't dead yet: the breaker's pendingSince mark is
+  // still set, so a hard termination will count as unhealthy and the
+  // next launch either resolves cleanly or enters RecoveryShell. We
+  // intentionally don't bump a recovery epoch here because that would
+  // tear down subscriptions during a transient GC pause — worse UX
+  // than just riding it out. Tight scope for now: observe + log.
+  useJSHeartbeat((stallMs) => {
+    console.warn(`[rider] JS thread stalled ${stallMs}ms`);
+  });
 
   // Crash-loop breaker: if the previous N launches never marked healthy,
   // we're in recovery mode. Show a safe UI instead of mounting the live-trip
