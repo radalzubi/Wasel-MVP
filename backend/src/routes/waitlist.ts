@@ -11,6 +11,7 @@ const WaitlistSchema = z.object({
   phone: z.string().regex(JORDAN_PHONE_REGEX, 'Phone must be a valid Jordanian mobile number (+9627XXXXXXXX)'),
   name: z.string().min(1).max(100),
   role: z.enum(['rider', 'driver']),
+  email: z.string().email().optional(),
   city: z.string().max(100).optional(),
   vehicle_type: z.string().max(100).optional(),
   referral_code: z.string().optional(),

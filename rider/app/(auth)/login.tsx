@@ -31,6 +31,11 @@ export default function LoginScreen() {
         body: JSON.stringify({ phone: formatted }),
       });
       const data = await res.json();
+      if (res.status === 503) {
+        // Backend is in waitlist mode — send the user to the waitlist screen.
+        router.replace('/waitlist');
+        return;
+      }
       if (!res.ok) {
         Alert.alert(t('error'), data.error || t('otpSendFailed'));
         return;

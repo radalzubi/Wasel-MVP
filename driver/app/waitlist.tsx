@@ -48,6 +48,7 @@ export default function DriverWaitlistScreen() {
   const { t } = useLanguage();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [city, setCity] = useState('');
   const [vehicleType, setVehicleType] = useState('');
   const [loading, setLoading] = useState(false);
@@ -79,6 +80,7 @@ export default function DriverWaitlistScreen() {
         body: JSON.stringify({
           name: name.trim(),
           phone: normalizedPhone,
+          email: email.trim() || undefined,
           city: city.trim() || undefined,
           vehicle_type: vehicleType || undefined,
           role: 'driver',
@@ -179,6 +181,18 @@ export default function DriverWaitlistScreen() {
             value={phone}
             onChangeText={setPhone}
             keyboardType="phone-pad"
+          />
+
+          <Text style={styles.label}>Email (optional)</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="mohammad@example.com"
+            placeholderTextColor="#555"
+            value={email}
+            onChangeText={setEmail}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
           />
 
           <Text style={styles.label}>{t('cityOptional')}</Text>

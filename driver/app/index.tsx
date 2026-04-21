@@ -3,23 +3,17 @@ import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { View, ActivityIndicator } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001';
-const WAITLIST_CACHE_KEY = '@wasel/waitlist-mode';
 
 // Fetch waitlist mode from the backend /health endpoint.
-// Returns the cached value immediately on subsequent launches (stale-while-revalidate),
-// so the spinner is only shown on the very first ever launch.
 async function fetchWaitlistMode(): Promise<boolean> {
   try {
     const res = await fetch(`${API_URL}/health`, {
       signal: AbortSignal.timeout(4000),
     });
     const data = await res.json();
-    const mode = data.waitlistMode === true;
-    await AsyncStorage.setItem(WAITLIST_CACHE_KEY, mode ? 'true' : 'false');
-    return mode;
+    return data.waitlistMode === true;
   } catch {
     // Network failed — default open so drivers aren't locked out by a backend hiccup.
     return false;
@@ -45,19 +39,13 @@ export default function Index() {
   }, []);
 
   // Fetch waitlist mode in parallel with auth loading.
+  // Always fetch fresh — the health endpoint is fast (<300 ms) and this
+  // ensures WAITLIST_MODE changes on Railway take effect on the very next
+  // app open instead of being stuck in a stale AsyncStorage cache.
   useEffect(() => {
-    (async () => {
-      const cached = await AsyncStorage.getItem(WAITLIST_CACHE_KEY);
-      if (cached !== null && mountedRef.current) {
-        setWaitlistMode(cached === 'true');
-        fetchWaitlistMode().then((mode) => {
-          if (mountedRef.current) setWaitlistMode(mode);
-        });
-      } else {
-        const mode = await fetchWaitlistMode();
-        if (mountedRef.current) setWaitlistMode(mode);
-      }
-    })();
+    fetchWaitlistMode().then((mode) => {
+      if (mountedRef.current) setWaitlistMode(mode);
+    });
   }, []);
 
   useEffect(() => {
