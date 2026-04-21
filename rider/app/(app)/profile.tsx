@@ -17,6 +17,8 @@ interface RiderProfile {
   is_waitlist_member: boolean;
   waitlist_joined_at?: string;
   waitlist_position?: number;
+  average_rating: number | null;
+  rating_count: number;
 }
 
 function formatPhone(raw: string): string {
@@ -180,6 +182,17 @@ export default function ProfileScreen() {
                   {t('memberSince')} {formatMemberSince(displayCreatedAt)}
                 </Text>
               ) : null}
+              {/* Rating row */}
+              {profile && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, marginBottom: 4 }}>
+                  <Ionicons name="star" size={14} color="#F5A623" style={{ marginRight: 4 }} />
+                  <Text style={{ color: '#FFF', fontSize: 14, fontWeight: '600' }}>
+                    {(profile.rating_count ?? 0) > 0 && profile.average_rating != null
+                      ? `${Number(profile.average_rating).toFixed(2)}  (${profile.rating_count} ${t('ratingCount')})`
+                      : t('noRatingYet')}
+                  </Text>
+                </View>
+              )}
             </>
           )}
         </View>

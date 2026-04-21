@@ -180,6 +180,8 @@ const translations: Record<string, Record<Language, string>> = {
   noTripsYet:  { en: 'No completed trips yet', ar: 'لا توجد رحلات مكتملة بعد' },
   tripPickup:  { en: 'Pickup',                 ar: 'الانطلاق' },
   tripDropoff: { en: 'Dropoff',                ar: 'الوجهة' },
+  ratingCount:  { en: 'ratings',        ar: 'تقييم' },
+  noRatingYet:  { en: 'No ratings yet', ar: 'لا تقييمات بعد' },
 };
 
 const LanguageContext = createContext<LanguageContextType>({

@@ -147,6 +147,9 @@ const translations: Record<string, Record<Language, string>> = {
   // Trip History
   tripHistory: { en: 'Trip history', ar: 'سجل الرحلات' },
   noTripsYet: { en: 'No trips yet', ar: 'لا رحلات بعد' },
+  yourRating:   { en: 'Your Rating',    ar: 'تقييمك' },
+  ratingCount:  { en: 'ratings',        ar: 'تقييم' },
+  noRatingYet:  { en: 'No ratings yet', ar: 'لا تقييمات بعد' },
 };
 
 const LanguageContext = createContext<LanguageContextType>({

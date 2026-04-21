@@ -20,6 +20,8 @@ interface DriverProfile {
   subscription_tier: number;
   is_online: boolean;
   created_at: string;
+  average_rating: number | null;
+  rating_count: number;
 }
 
 const TIER: Record<number, { label: string; color: string; bg: string }> = {
@@ -108,6 +110,15 @@ export default function ProfileScreen() {
             <Text style={s.name}>{profile.name}</Text>
             <Text style={s.phone}>{profile.phone}</Text>
             <Text style={s.since}>Driver since {formatSince(profile.created_at)}</Text>
+            {/* Rating row */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, marginBottom: 4 }}>
+              <Ionicons name="star" size={14} color="#F5A623" style={{ marginRight: 4 }} />
+              <Text style={{ color: '#FFF', fontSize: 14, fontWeight: '600' }}>
+                {(profile.rating_count ?? 0) > 0 && profile.average_rating != null
+                  ? `${Number(profile.average_rating).toFixed(2)}  (${profile.rating_count} ${t('ratingCount')})`
+                  : t('noRatingYet')}
+              </Text>
+            </View>
           </View>
           <View style={[s.tierPill, { backgroundColor: tier.bg }]}>
             <Text style={[s.tierPillTxt, { color: tier.color }]}>{tier.label}</Text>
