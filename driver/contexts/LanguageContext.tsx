@@ -186,9 +186,25 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [selectorVisible, setSelectorVisible] = useState(false);
 
   useEffect(() => {
+    // Guards against setState-after-unmount if the provider is torn down
+    // before AsyncStorage resolves (e.g. during a logout/navigation race).
+    let mounted = true;
     AsyncStorage.getItem(STORAGE_KEY).then((stored) => {
-      if (stored === 'ar' || stored === 'en') setLanguage(stored);
+      if (!mounted) return;
+      if (stored === 'ar' || stored === 'en') {
+        setLanguage(stored);
+        // Re-apply RTL direction on every launch so the layout engine is
+        // always in sync with the stored preference. Without this, switching
+        // to Arabic and restarting can leave I18nManager.isRTL in a stale
+        // state — layout engine corruption on iOS can trigger a native abort.
+        // Mirrors the rider LanguageContext safety-net.
+        const needsRTL = stored === 'ar';
+        if (I18nManager.isRTL !== needsRTL) {
+          I18nManager.forceRTL(needsRTL);
+        }
+      }
     }).catch(() => {});
+    return () => { mounted = false; };
   }, []);
 
   // Opens the modal instead of auto-toggling

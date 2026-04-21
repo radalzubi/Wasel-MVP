@@ -373,13 +373,25 @@ export default function DashboardScreen() {
 
     let subscription: Location.LocationSubscription | null = null;
     let cancelled = false;
+    // AbortController terminates any in-flight `fetch` PATCH when the effect
+    // tears down (driver toggles offline, unmounts, or logs out). Without this
+    // the native request can complete on a dead component and throw an
+    // unhandled promise rejection on iOS — with New Arch off that's benign
+    // but it still fires telemetry and has in rare cases been observed to
+    // tombstone the bridge if it races with an RCTModule release.
+    const abortController = new AbortController();
 
     (async () => {
       try {
         // Request foreground permission first (required on iOS before background).
         const { status: fgStatus } = await Location.requestForegroundPermissionsAsync();
+        // Distinguish permission states — iOS may return 'denied', 'restricted'
+        // (MDM/parental lock), 'limited' (approximate only), or 'undetermined'.
+        // Anything other than 'granted' means we can't start the watcher, but
+        // we continue without alerting — driver will see "waiting for trips"
+        // and figure it out. A future UX pass should prompt the user.
         if (fgStatus !== 'granted') {
-          console.warn('[location] foreground permission denied');
+          console.warn('[location] foreground permission not granted:', fgStatus);
           return;
         }
 
@@ -429,8 +441,11 @@ export default function DashboardScreen() {
                   Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({ lat, lng }),
+                signal: abortController.signal,
               });
             } catch (err) {
+              // AbortError is expected on cleanup — swallow silently.
+              if (err instanceof Error && err.name === 'AbortError') return;
               console.warn('[location] PATCH failed:', err);
             }
           },
@@ -443,6 +458,7 @@ export default function DashboardScreen() {
     return () => {
       cancelled = true;
       subscription?.remove();
+      abortController.abort();
     };
   }, [isOnline]);
 

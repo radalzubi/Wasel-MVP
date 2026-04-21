@@ -163,7 +163,11 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [selectorVisible, setSelectorVisible] = useState(false);
 
   useEffect(() => {
+    // Guards against setState-after-unmount if the provider is torn down
+    // before AsyncStorage resolves (e.g. during a logout/navigation race).
+    let mounted = true;
     AsyncStorage.getItem(STORAGE_KEY).then((stored) => {
+      if (!mounted) return;
       if (stored === 'ar' || stored === 'en') {
         setLanguage(stored);
         // Re-apply RTL direction on every launch so the layout engine is
@@ -176,6 +180,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
         }
       }
     }).catch(() => {});
+    return () => { mounted = false; };
   }, []);
 
   // Opens the modal instead of auto-toggling

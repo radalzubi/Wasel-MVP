@@ -24,15 +24,32 @@ export default function Index() {
       return;
     }
 
+    // Guards against setState-after-unmount if the user signs out mid-query.
+    let cancelled = false;
+
+    // Timeout safety net — if the Supabase query hangs (network dead, PostgREST
+    // timing out, Supabase edge degraded), the UI is stuck on a loading spinner
+    // and iOS will watchdog-kill the app at ~20 s. Fall back to 'approved' after
+    // 6 s so the dashboard renders; the dashboard's own auth + profile gates
+    // take over from there.
+    const timeoutHandle = setTimeout(() => {
+      if (cancelled) return;
+      console.warn('[driver/index] drivers row query timed out — falling back to dashboard');
+      setDriverState('approved');
+    }, 6_000);
+
     // Check the driver's profile to decide where to route them.
     // This prevents a driver whose token is still valid but who hasn't been
     // approved yet from being routed straight to the dashboard on app restart.
-    supabase
-      .from('drivers')
-      .select('is_approved')
-      .eq('id', session.user.id)
-      .maybeSingle()
-      .then(({ data }) => {
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('drivers')
+          .select('is_approved')
+          .eq('id', session.user.id)
+          .maybeSingle();
+        if (cancelled) return;
+        clearTimeout(timeoutHandle);
         if (!data) {
           // No driver profile yet — registration form was never submitted.
           setDriverState('pending_registration');
@@ -41,11 +58,18 @@ export default function Index() {
         } else {
           setDriverState('pending_approval');
         }
-      })
-      .catch(() => {
+      } catch {
+        if (cancelled) return;
+        clearTimeout(timeoutHandle);
         // On DB error fall back to dashboard; the dashboard has its own auth guard.
         setDriverState('approved');
-      });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutHandle);
+    };
   }, [loading, session?.user?.id]);
 
   if (loading || (session && driverState === null)) {
