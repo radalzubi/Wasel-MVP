@@ -109,7 +109,7 @@ export default function DriverWaitlistScreen() {
 
         {/* ── Logo ── */}
         <View style={styles.logoBlock}>
-          <Text style={styles.logo}>وصل</Text>
+          <Text style={styles.logo}>واصل</Text>
           <Text style={styles.logoEn}>Wasel</Text>
         </View>
 

@@ -15,7 +15,7 @@ export default function WaitlistSuccess() {
           Tell your friends — the more people who sign up, the faster we launch.
         </Text>
         <View style={styles.badge}>
-          <Text style={styles.badgeText}>وصل  ·  Wasel</Text>
+          <Text style={styles.badgeText}>واصل  ·  Wasel</Text>
         </View>
 
         <TouchableOpacity

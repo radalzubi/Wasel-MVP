@@ -63,7 +63,7 @@ export default function DriverLoginScreen() {
         </View>
 
         <View style={styles.header}>
-          <Text style={styles.logo}>وصل</Text>
+          <Text style={styles.logo}>واصل</Text>
           <Text style={styles.logoEn}>Wasel</Text>
           <Text style={styles.role}>Driver</Text>
         </View>

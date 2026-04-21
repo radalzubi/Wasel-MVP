@@ -1139,7 +1139,7 @@ export default function DashboardScreen() {
       {/* Top bar */}
       <SafeAreaView style={styles.topBar} edges={['top']}>
         <View style={styles.topBarInner}>
-          <Text style={styles.topLogo}>وصل <Text style={styles.driverBadge}>Driver</Text></Text>
+          <Text style={styles.topLogo}>واصل <Text style={styles.driverBadge}>Driver</Text></Text>
           <View style={[styles.tierBadge, { backgroundColor: tierBadge.color }]}>
             <Text style={[styles.tierBadgeText, { color: tierBadge.text }]}>{tierBadge.label}</Text>
           </View>

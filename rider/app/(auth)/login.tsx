@@ -64,7 +64,7 @@ export default function LoginScreen() {
         </View>
 
         <View style={styles.header}>
-          <Text style={styles.logo}>وصل</Text>
+          <Text style={styles.logo}>واصل</Text>
           <Text style={styles.logoEn}>Wasel</Text>
         </View>
 

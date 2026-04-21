@@ -41,7 +41,7 @@ export default function DriverWaitlistSuccess() {
         </View>
 
         <View style={styles.badge}>
-          <Text style={styles.badgeText}>وصل  ·  Wasel Driver</Text>
+          <Text style={styles.badgeText}>واصل  ·  Wasel Driver</Text>
         </View>
 
         <TouchableOpacity
