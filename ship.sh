@@ -67,13 +67,13 @@ echo "   ✓ Done"
 python3 - "$APP_DIR/ios/Podfile" <<'PYEOF'
 import sys
 path = sys.argv[1]
+# Remove all build phases from the duplicate target so it produces no output.
+# SKIP_INSTALL only affects installation, not whether build phases run.
 fix = """
-  # ship.sh: disable duplicate ExpoNotifications privacy bundle target
+  # ship.sh: strip build phases from duplicate ExpoNotifications privacy target
   installer.pods_project.targets.each do |target|
     if target.name == 'EXNotifications-ExpoNotifications_privacy'
-      target.build_configurations.each do |config|
-        config.build_settings['SKIP_INSTALL'] = 'YES'
-      end
+      target.build_phases.each(&:remove_from_project)
     end
   end
 """
@@ -117,10 +117,12 @@ xcodebuild archive \
   -destination "generic/platform=iOS" \
   -archivePath "$BUILD_DIR/$SCHEME.xcarchive" \
   -allowProvisioningUpdates \
+  -authenticationKeyPath "$HOME/.private_keys/AuthKey_${ASC_KEY_ID}.p8" \
+  -authenticationKeyID "$ASC_KEY_ID" \
+  -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
   CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
   MARKETING_VERSION="1.0.0" \
   CODE_SIGN_STYLE=Automatic \
-  CODE_SIGN_IDENTITY="Apple Distribution" \
   DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
   -quiet
 echo "   ✓ Archive created"
