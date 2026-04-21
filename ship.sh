@@ -26,6 +26,7 @@ source "$SECRETS_FILE"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 APP_DIR="$ROOT/$APP"
 BUILD_DIR="$APP_DIR/build"
+P8_PATH="$HOME/.private_keys/AuthKey_${ASC_KEY_ID}.p8"
 
 case "$APP" in
   rider)
@@ -59,39 +60,31 @@ cd "$APP_DIR"
 EXPO_PUBLIC_API_URL="$API_URL" npx expo prebuild --platform ios --clean
 echo "   ✓ Done"
 
-# ── Fix: patch Podfile before pod install ─────────────────────────────────────
-# expo-notifications registers two CocoaPods targets that both try to build
-# the same ExpoNotifications_privacy.bundle, causing "Multiple commands produce"
-# error. We inject the fix inside the existing post_install block (CocoaPods
-# does not allow multiple post_install blocks).
-python3 - "$APP_DIR/ios/Podfile" <<'PYEOF'
-import sys
-path = sys.argv[1]
-# Remove all build phases from the duplicate target so it produces no output.
-# SKIP_INSTALL only affects installation, not whether build phases run.
-fix = """
-  # ship.sh: strip build phases from duplicate ExpoNotifications privacy target
-  installer.pods_project.targets.each do |target|
-    if target.name == 'EXNotifications-ExpoNotifications_privacy'
-      target.build_phases.each(&:remove_from_project)
-    end
-  end
-"""
-with open(path) as f:
-    content = f.read()
-marker = 'post_install do |installer|'
-if marker in content and 'EXNotifications-ExpoNotifications_privacy' not in content:
-    content = content.replace(marker, marker + fix, 1)
-    with open(path, 'w') as f:
-        f.write(content)
-PYEOF
-
 # ── Step 2: Pod install ────────────────────────────────────────────────────────
 echo ""
 echo "▶ Step 2/5 — pod install (installs iOS dependencies)"
 cd "$APP_DIR/ios"
 pod install --silent
 cd "$APP_DIR"
+
+# Fix: expo-notifications registers two CocoaPods targets that both produce
+# ExpoNotifications_privacy.bundle, causing "Multiple commands produce" error.
+# We use the xcodeproj gem (already installed by CocoaPods) to strip all build
+# phases from the duplicate legacy target directly in the Pods project file.
+ruby - "$APP_DIR/ios/Pods/Pods.xcodeproj" <<'RUBYEOF'
+require 'xcodeproj'
+path = ARGV[0]
+project = Xcodeproj::Project.open(path)
+target = project.targets.find { |t| t.name == 'EXNotifications-ExpoNotifications_privacy' }
+if target
+  target.build_phases.each(&:remove_from_project)
+  project.save
+  puts "   ✓ Removed duplicate ExpoNotifications build phases"
+else
+  puts "   ✓ No duplicate target found (already clean)"
+end
+RUBYEOF
+
 echo "   ✓ Done"
 
 # ── Detect workspace and scheme ────────────────────────────────────────────────
@@ -107,6 +100,8 @@ echo "   Workspace: $(basename "$WORKSPACE")"
 echo "   Scheme:    $SCHEME"
 
 # ── Step 3: Archive ────────────────────────────────────────────────────────────
+# Skip code signing during archive — the export step (Step 4) handles all
+# signing with the App Store distribution certificate via the API key.
 echo ""
 echo "▶ Step 3/5 — Archive (compiling... this takes 10–15 min)"
 mkdir -p "$BUILD_DIR"
@@ -116,20 +111,17 @@ xcodebuild archive \
   -configuration Release \
   -destination "generic/platform=iOS" \
   -archivePath "$BUILD_DIR/$SCHEME.xcarchive" \
-  -allowProvisioningUpdates \
-  -authenticationKeyPath "$HOME/.private_keys/AuthKey_${ASC_KEY_ID}.p8" \
-  -authenticationKeyID "$ASC_KEY_ID" \
-  -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
   CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
   MARKETING_VERSION="1.0.0" \
-  CODE_SIGN_STYLE=Automatic \
-  DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+  CODE_SIGNING_REQUIRED=NO \
+  CODE_SIGN_IDENTITY="" \
   -quiet
 echo "   ✓ Archive created"
 
 # ── Step 4: Export IPA ─────────────────────────────────────────────────────────
+# This is where actual App Store signing happens using the API key.
 echo ""
-echo "▶ Step 4/5 — Exporting IPA"
+echo "▶ Step 4/5 — Exporting and signing IPA"
 rm -rf "$BUILD_DIR/export"
 cat > "$BUILD_DIR/ExportOptions.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -155,8 +147,11 @@ xcodebuild -exportArchive \
   -exportOptionsPlist "$BUILD_DIR/ExportOptions.plist" \
   -exportPath "$BUILD_DIR/export" \
   -allowProvisioningUpdates \
+  -authenticationKeyPath "$P8_PATH" \
+  -authenticationKeyID "$ASC_KEY_ID" \
+  -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
   -quiet
-echo "   ✓ IPA exported"
+echo "   ✓ IPA exported and signed"
 
 # ── Step 5: Upload to TestFlight ───────────────────────────────────────────────
 echo ""
