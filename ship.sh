@@ -141,6 +141,13 @@ xcrun altool --upload-app \
   --apiKey "$ASC_KEY_ID" \
   --apiIssuer "$ASC_ISSUER_ID"
 
+# ── Cleanup ────────────────────────────────────────────────────────────────────
+echo ""
+echo "▶ Cleaning up build files"
+rm -rf "$BUILD_DIR"
+rm -rf "$APP_DIR/ios"
+echo "   ✓ Done"
+
 echo ""
 echo "┌─────────────────────────────────────────────────────┐"
 echo "│  ✅ $APP_LABEL shipped to TestFlight!"
