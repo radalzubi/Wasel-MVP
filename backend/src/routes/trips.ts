@@ -195,8 +195,14 @@ router.post('/:id/accept', requireAuth, requireDriver, async (req: AuthRequest, 
   // Between the offer check above and this update, the rider may cancel or
   // another instance may have processed this trip — the status guard makes
   // this transition atomic and prevents resurrecting a cancelled trip.
+  // Bump last_activity_at so restore queries order by real activity, not by
+  // row-birth time (see migration 013 for rationale).
   const { data: acceptedTripRows, error } = await supabase.from('trips')
-    .update({ status: 'accepted', driver_id: req.userId })
+    .update({
+      status: 'accepted',
+      driver_id: req.userId,
+      last_activity_at: new Date().toISOString(),
+    })
     .eq('id', tripId)
     .eq('status', 'dispatching')
     .select('id, rider_id');
@@ -286,7 +292,13 @@ router.post('/:id/status', requireAuth, async (req: AuthRequest, res) => {
     });
   }
 
-  const updates: Record<string, unknown> = { status: parsed.data.status };
+  const updates: Record<string, unknown> = {
+    status: parsed.data.status,
+    // Every status transition is real activity — bump the activity stamp so
+    // the next /active / /driver-active read orders by truth, not by
+    // created_at (which never changes after insert).
+    last_activity_at: new Date().toISOString(),
+  };
   if (parsed.data.status === 'completed') {
     updates.completed_at = new Date().toISOString();
   }
@@ -426,12 +438,15 @@ router.get('/any-pending', requireAuth, requireRider, async (req: AuthRequest, r
 router.get('/active', requireAuth, requireRider, async (req: AuthRequest, res) => {
   const LIVE_STATUSES = ['accepted', 'en_route', 'arrived', 'in_progress'];
 
+  // Order by last_activity_at DESC, NOT created_at — see migration 013 for
+  // rationale. If multiple live trips exist (data-integrity violation), the
+  // one with the most recent real activity wins.
   const { data: allActive, error } = await supabase
     .from('trips')
-    .select('id, driver_id, status, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, pickup_address, dropoff_address, fare_amount, created_at')
+    .select('id, driver_id, status, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, pickup_address, dropoff_address, fare_amount, created_at, last_activity_at')
     .eq('rider_id', req.userId!)
     .in('status', LIVE_STATUSES)
-    .order('created_at', { ascending: false });
+    .order('last_activity_at', { ascending: false });
 
   if (error) {
     console.error('[trips/active] DB error:', error.message);
@@ -471,12 +486,13 @@ router.get('/active', requireAuth, requireRider, async (req: AuthRequest, res) =
 router.get('/driver-active', requireAuth, requireDriver, async (req: AuthRequest, res) => {
   const LIVE_STATUSES = ['accepted', 'en_route', 'arrived', 'in_progress'];
 
+  // Order by last_activity_at DESC — see /active comment above.
   const { data: allActive, error } = await supabase
     .from('trips')
-    .select('id, rider_id, status, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, pickup_address, dropoff_address, fare_amount, created_at')
+    .select('id, rider_id, status, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, pickup_address, dropoff_address, fare_amount, created_at, last_activity_at')
     .eq('driver_id', req.userId!)
     .in('status', LIVE_STATUSES)
-    .order('created_at', { ascending: false });
+    .order('last_activity_at', { ascending: false });
 
   if (error) {
     console.error('[trips/driver-active] DB error:', error.message);

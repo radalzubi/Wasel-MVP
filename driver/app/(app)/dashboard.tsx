@@ -24,6 +24,22 @@ const IS_EXPO_GO = Constants.executionEnvironment === 'storeClient';
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 const AMMAN = { latitude: 31.9539, longitude: 35.9106 };
 
+// Normalize any backend-sourced coordinate pair to a finite LatLng or null.
+// Treat NaN, Infinity, null, undefined, strings, and the (0,0) "null island"
+// sentinel as invalid. Centralising this means the render path never has to
+// think about what "valid coord" means — it just checks for null.
+function finiteLatLng(
+  lat: unknown,
+  lng: unknown,
+): { latitude: number; longitude: number } | null {
+  if (typeof lat !== 'number' || !isFinite(lat)) return null;
+  if (typeof lng !== 'number' || !isFinite(lng)) return null;
+  // Null Island (0,0) is almost certainly a backend default/geocoding miss,
+  // not a real destination in Jordan. Reject it at the boundary.
+  if (lat === 0 && lng === 0) return null;
+  return { latitude: lat, longitude: lng };
+}
+
 function openNavigation(lat: number, lng: number) {
   // Guard against null/0/NaN coordinates (can happen if backend omits geocoding)
   if (!isFinite(lat) || !isFinite(lng) || (lat === 0 && lng === 0)) return;
@@ -112,6 +128,10 @@ export default function DashboardScreen() {
   // Gate ALL map children on this flag — rendering Markers/Polylines before
   // the native map layer fires onMapReady causes native crashes.
   const [mapReady, setMapReady]               = useState(false);
+  // Ref mirror of mapReady so setTimeout/async callbacks can read the latest
+  // value without relying on a stale closure captured at effect-creation
+  // time. Kept in sync via the effect just below.
+  const mapReadyRef = useRef(false);
   // Stash for an initial animateToRegion that was requested before onMapReady.
   // State (not ref) so a subsequent mapReady flip or new pending region both
   // trigger the applying effect. Avoids pre-ready native crashes.
@@ -220,6 +240,9 @@ export default function DashboardScreen() {
   // Keep currentTripRef in sync so the offer handler can check it synchronously
   // without depending on stale closure values.
   useEffect(() => { currentTripRef.current = currentTrip; }, [currentTrip]);
+
+  // Keep mapReadyRef in sync with the mapReady state
+  useEffect(() => { mapReadyRef.current = mapReady; }, [mapReady]);
 
   // Keep locationRef in sync so map callbacks always use the latest GPS fix
   // instead of a stale closure value captured at effect-creation time.
@@ -491,63 +514,79 @@ export default function DashboardScreen() {
         const d = await tripRes.json();
         if (didCancel || !isMounted.current) return;
 
-        // Validate each coordinate as a finite number BEFORE committing to state.
-        // The render path uses `!= null` as its gate, so a stringified "NaN" or
-        // a zero-zero pair slipping through from the backend would reach
-        // <Marker coordinate={...} /> and crash the native map layer on Android.
-        // Sanitising here makes the downstream gates safe by construction.
-        const finite = (v: unknown): v is number => typeof v === 'number' && isFinite(v);
-        const safePickup =
-          finite(d.pickup_lat) && finite(d.pickup_lng)
-            ? { lat: d.pickup_lat, lng: d.pickup_lng }
-            : null;
-        const safeDropoff =
-          finite(d.dropoff_lat) && finite(d.dropoff_lng)
-            ? { lat: d.dropoff_lat, lng: d.dropoff_lng }
-            : null;
+        // Normalize coordinates at the trust boundary. `finiteLatLng` returns
+        // null for NaN/Infinity/null/undefined/non-numbers/(0,0). Every
+        // render and map command downstream checks for null only — they no
+        // longer have to think about what counts as "valid".
+        const safePickup  = finiteLatLng(d.pickup_lat,  d.pickup_lng);
+        const safeDropoff = finiteLatLng(d.dropoff_lat, d.dropoff_lng);
 
         setTripDetails({
           pickup_address:  d.pickup_address  ?? 'Pickup location',
           dropoff_address: d.dropoff_address ?? 'Dropoff location',
           fare_amount:     d.fare_amount != null ? `${d.fare_amount} JD` : '',
-          pickup_lat:  safePickup?.lat  ?? null,
-          pickup_lng:  safePickup?.lng  ?? null,
-          dropoff_lat: safeDropoff?.lat ?? null,
-          dropoff_lng: safeDropoff?.lng ?? null,
+          pickup_lat:  safePickup?.latitude  ?? null,
+          pickup_lng:  safePickup?.longitude ?? null,
+          dropoff_lat: safeDropoff?.latitude ?? null,
+          dropoff_lng: safeDropoff?.longitude ?? null,
         });
 
-        // Guard: coordinates must be finite numbers (not null/NaN/Infinity) —
-        // passing invalid values to MapView causes a native crash on Android.
-        if (
-          typeof d.pickup_lat === 'number' && isFinite(d.pickup_lat) &&
-          typeof d.pickup_lng === 'number' && isFinite(d.pickup_lng)
-        ) {
-          const pickupCoord = { latitude: d.pickup_lat, longitude: d.pickup_lng };
-          // 500 ms gives the native map layer time to finish reconciling any
-          // Marker/Polyline changes before calling fitToCoordinates — calling
-          // it while the native layer is still updating children can crash.
+        // Delayed map-fit: only fire if ALL of these still hold when the
+        // timeout elapses:
+        //   - the fetch was not cancelled (trip didn't change under us)
+        //   - the component is still mounted
+        //   - the native map layer has fired onMapReady
+        //   - mapRef.current exists (sanity check)
+        //   - the same trip is still current (prevents a fit on the NEW trip's
+        //     screen using coords from the OLD trip)
+        //   - pickup coord is finite
+        //   - the driver's current location (if any) is finite and within 200 km
+        // Any missed gate = skip. A skipped fit degrades to the user seeing the
+        // already-set initialRegion, which is visually acceptable — calling
+        // fitToCoordinates with stale/invalid state is a native crash.
+        if (safePickup) {
+          const savedTripId = currentTrip.id;
           setTimeout(() => {
             if (didCancel || !isMounted.current) return;
+            if (!mapReadyRef.current) return;
+            if (!mapRef.current) return;
+            if (currentTripRef.current?.id !== savedTripId) return;
+
             const currentLoc = locationRef.current;
-            // Only fit both points if the driver is within 200 km of the pickup.
-            // If the driver's GPS fix is in a different country (e.g., during
-            // testing from overseas), fitToCoordinates would span the globe and
-            // produce an extreme zoom-out that crashes the native map layer.
+            const driverLocValid =
+              currentLoc != null &&
+              isFinite(currentLoc.latitude) && isFinite(currentLoc.longitude);
+
+            // Only fit both points if the driver is within 200 km of pickup.
+            // Otherwise fitToCoordinates would span the globe and produce an
+            // extreme zoom-out that has been observed to crash MapView
+            // natively on both iOS and Android.
             const nearPickup =
-              currentLoc &&
-              haversineKm(currentLoc.latitude, currentLoc.longitude,
-                          d.pickup_lat, d.pickup_lng) < 200;
-            if (nearPickup && currentLoc) {
-              mapRef.current?.fitToCoordinates([currentLoc, pickupCoord], {
-                edgePadding: { top: 100, right: 60, bottom: 320, left: 60 },
-                animated: true,
-              });
-            } else {
-              mapRef.current?.animateToRegion({
-                ...pickupCoord,
-                latitudeDelta: 0.02,
-                longitudeDelta: 0.02,
-              }, 600);
+              driverLocValid &&
+              haversineKm(
+                currentLoc.latitude, currentLoc.longitude,
+                safePickup.latitude, safePickup.longitude,
+              ) < 200;
+
+            try {
+              if (nearPickup && driverLocValid) {
+                mapRef.current.fitToCoordinates(
+                  [currentLoc, safePickup],
+                  {
+                    edgePadding: { top: 100, right: 60, bottom: 320, left: 60 },
+                    animated: true,
+                  },
+                );
+              } else {
+                mapRef.current.animateToRegion(
+                  { ...safePickup, latitudeDelta: 0.02, longitudeDelta: 0.02 },
+                  600,
+                );
+              }
+            } catch (mapErr) {
+              // Native map call rejected — swallow. The UI still renders the
+              // trip panel; the map just won't auto-fit this time.
+              console.warn('[dashboard] map fit/animate rejected:', mapErr);
             }
           }, 500);
         }
@@ -954,7 +993,13 @@ export default function DashboardScreen() {
         provider={IS_EXPO_GO ? undefined : PROVIDER_GOOGLE}
         initialRegion={{ ...AMMAN, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
         showsUserLocation={false}
-        customMapStyle={IS_EXPO_GO ? undefined : DARK_MAP_STYLE}
+        // customMapStyle applied only on Android. On iOS under PROVIDER_GOOGLE
+        // the large style JSON gets serialised across the bridge on every
+        // re-render and has been observed to trigger MapView native aborts
+        // during rapid state churn (trip restore + live updates). Android's
+        // native Google Maps SDK handles style JSON as a first-class arg and
+        // is stable. Styled iOS is a future nice-to-have, not a release goal.
+        customMapStyle={Platform.OS === 'android' && !IS_EXPO_GO ? DARK_MAP_STYLE : undefined}
         onMapReady={() => setMapReady(true)}
       >
         {/* Gate ALL map children on mapReady — adding Markers/Polylines before

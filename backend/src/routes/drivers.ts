@@ -11,6 +11,14 @@ const LocationSchema = z.object({
 });
 
 // PATCH /api/drivers/location — update driver GPS
+//
+// When the driver is mid-trip, this endpoint also bumps the active trip's
+// last_activity_at so restore queries see real activity heartbeats rather
+// than only noticing "activity" on explicit status transitions. Without
+// this, a long leg between pickup and dropoff (10-60 min of en_route /
+// in_progress) would have zero recorded activity and ordering ambiguity
+// between concurrent live rows (data-integrity violation) would fall back
+// to created_at — which is exactly the bug we're removing.
 router.patch('/location', requireAuth, requireDriver, async (req: AuthRequest, res) => {
   const parsed = LocationSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
@@ -25,6 +33,20 @@ router.patch('/location', requireAuth, requireDriver, async (req: AuthRequest, r
     .eq('id', req.userId);
 
   if (error) return res.status(500).json({ error: 'Failed to update location' });
+
+  // Fire-and-forget activity heartbeat on the driver's live trip (if any).
+  // Not awaited — response to the client is not blocked on this write, and
+  // a failure is non-fatal (restore still works via the next status change).
+  // The .in() status filter ensures terminal trips are never touched.
+  void supabase
+    .from('trips')
+    .update({ last_activity_at: new Date().toISOString() })
+    .eq('driver_id', req.userId)
+    .in('status', ['accepted', 'en_route', 'arrived', 'in_progress'])
+    .then(({ error: e }) => {
+      if (e) console.warn('[drivers/location] activity-stamp failed:', e.message);
+    });
+
   res.json({ ok: true });
 });
 

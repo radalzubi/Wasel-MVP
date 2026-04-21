@@ -6,7 +6,11 @@
     "rider",
     "driver"
   ],
+  "engines": {
+    "node": ">=20.0.0 <21.0.0"
+  },
   "scripts": {
+    "preinstall": "node -e \"if (+process.versions.node.split('.')[0] < 20) { console.error('Wasel MVP requires Node 20. You are on ' + process.version + '. See .nvmrc.'); process.exit(1); }\"",
     "rider": "npm start --workspace=rider",
     "driver": "npm start --workspace=driver",
     "backend:dev": "npm --prefix backend run dev",

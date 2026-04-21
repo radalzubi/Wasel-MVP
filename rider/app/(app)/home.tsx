@@ -34,6 +34,20 @@ function inJordan(lat: number, lng: number) {
     lng >= JORDAN.minLng && lng <= JORDAN.maxLng;
 }
 
+// Normalise any coordinate pair to a finite LatLng or null. See equivalent
+// helper in driver/app/(app)/dashboard.tsx — centralising "what counts as a
+// valid coord" keeps every map callsite trivially safe (null or finite only,
+// never NaN / Infinity / (0,0) sentinel / wrong type).
+function finiteLatLng(
+  lat: unknown,
+  lng: unknown,
+): { latitude: number; longitude: number } | null {
+  if (typeof lat !== 'number' || !isFinite(lat)) return null;
+  if (typeof lng !== 'number' || !isFinite(lng)) return null;
+  if (lat === 0 && lng === 0) return null;
+  return { latitude: lat, longitude: lng };
+}
+
 type TripStatus =
   | 'idle' | 'searching' | 'dispatching'
   | 'accepted' | 'en_route' | 'arrived'
@@ -79,6 +93,9 @@ export default function HomeScreen() {
   // React Native Maps can crash if Markers/Polylines are added to the native
   // map layer before onMapReady fires. Gate all map children on this flag.
   const [mapReady, setMapReady] = useState(false);
+  // Ref mirror so setTimeout/async callbacks can read the latest mapReady
+  // without relying on a stale closure captured at effect-creation time.
+  const mapReadyRef = useRef(false);
   // Stash for an initial animateToRegion that was requested before onMapReady.
   // State (not ref) so a subsequent mapReady flip or new pending region both
   // trigger the applying effect. Avoids pre-ready animateToRegion calls,
@@ -219,10 +236,15 @@ export default function HomeScreen() {
         );
         setTimeout(() => {
           if (!isMounted.current) return;
-          mapRef.current?.fitToCoordinates([pickupCoords, coords], {
-            edgePadding: { top: 120, right: 60, bottom: 320, left: 60 },
-            animated: true,
-          });
+          if (!mapReadyRef.current || !mapRef.current) return;
+          try {
+            mapRef.current.fitToCoordinates([pickupCoords, coords], {
+              edgePadding: { top: 120, right: 60, bottom: 320, left: 60 },
+              animated: true,
+            });
+          } catch (e) {
+            console.warn('[home] fitToCoordinates (explore) rejected:', e);
+          }
         }, 500);
       }
       setSearchMode('confirmed');
@@ -268,12 +290,19 @@ export default function HomeScreen() {
     setPendingInitialRegion({ ...AMMAN, latitudeDelta: 0.05, longitudeDelta: 0.05 });
   }
 
+  // Keep mapReadyRef in sync with mapReady state for setTimeout/async callers.
+  useEffect(() => { mapReadyRef.current = mapReady; }, [mapReady]);
+
   // Apply the stashed initial region once the map is ready. Runs whenever
   // either mapReady or pendingInitialRegion changes, so it handles both
   // orderings (GPS→mapReady or mapReady→GPS) cleanly.
   useEffect(() => {
-    if (!mapReady || !pendingInitialRegion) return;
-    mapRef.current?.animateToRegion(pendingInitialRegion, 800);
+    if (!mapReady || !pendingInitialRegion || !mapRef.current) return;
+    try {
+      mapRef.current.animateToRegion(pendingInitialRegion, 800);
+    } catch (e) {
+      console.warn('[home] initial animateToRegion rejected:', e);
+    }
     setPendingInitialRegion(null);
   }, [mapReady, pendingInitialRegion]);
 
@@ -624,21 +653,32 @@ export default function HomeScreen() {
     const driverNearPickup =
       haversineKm(driverLocation.latitude, driverLocation.longitude,
                   pickupCoords.latitude,   pickupCoords.longitude) < 200;
+    const savedTripId = currentTripIdRef.current;
     const t = setTimeout(() => {
       if (!isMounted.current) return;
-      if (driverNearPickup) {
-        mapRef.current?.fitToCoordinates([driverLocation, pickupCoords], {
-          edgePadding: { top: 100, right: 60, bottom: 380, left: 60 },
-          animated: true,
-        });
-      } else {
-        // Driver is far away — just centre on the pickup so the map stays usable.
-        mapRef.current?.animateToRegion({
-          latitude: pickupCoords.latitude,
-          longitude: pickupCoords.longitude,
-          latitudeDelta: 0.02,
-          longitudeDelta: 0.02,
-        }, 600);
+      if (!mapReadyRef.current || !mapRef.current) return;
+      // Guard against a trip change during the 500 ms delay — firing a fit on
+      // a stale trip's coords would snap the map to a trip that's no longer
+      // on screen, and in some real-device traces has correlated with the
+      // reopen-crash-loop.
+      if (currentTripIdRef.current !== savedTripId) return;
+      try {
+        if (driverNearPickup) {
+          mapRef.current.fitToCoordinates([driverLocation, pickupCoords], {
+            edgePadding: { top: 100, right: 60, bottom: 380, left: 60 },
+            animated: true,
+          });
+        } else {
+          // Driver is far away — just centre on the pickup so the map stays usable.
+          mapRef.current.animateToRegion({
+            latitude: pickupCoords.latitude,
+            longitude: pickupCoords.longitude,
+            latitudeDelta: 0.02,
+            longitudeDelta: 0.02,
+          }, 600);
+        }
+      } catch (e) {
+        console.warn('[home] driver-fit rejected:', e);
       }
     }, 500);
     return () => clearTimeout(t);
@@ -732,10 +772,15 @@ export default function HomeScreen() {
         );
         setTimeout(() => {
           if (!isMounted.current) return;
-          mapRef.current?.fitToCoordinates([pickupCoords, coords], {
-            edgePadding: { top: 120, right: 60, bottom: 320, left: 60 },
-            animated: true,
-          });
+          if (!mapReadyRef.current || !mapRef.current) return;
+          try {
+            mapRef.current.fitToCoordinates([pickupCoords, coords], {
+              edgePadding: { top: 120, right: 60, bottom: 320, left: 60 },
+              animated: true,
+            });
+          } catch (e) {
+            console.warn('[home] fitToCoordinates (suggestion) rejected:', e);
+          }
         }, 500);
       }
     } else {
@@ -1025,7 +1070,11 @@ export default function HomeScreen() {
         initialRegion={{ ...AMMAN, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
         showsUserLocation={showUserLocation}
         showsMyLocationButton={false}
-        customMapStyle={IS_EXPO_GO ? undefined : DARK_MAP_STYLE}
+        // customMapStyle: Android only. On iOS under PROVIDER_GOOGLE the large
+        // style JSON crosses the bridge on every re-render and has been tied
+        // to native MapView aborts during rapid state churn. See driver
+        // dashboard for the same treatment.
+        customMapStyle={Platform.OS === 'android' && !IS_EXPO_GO ? DARK_MAP_STYLE : undefined}
         onMapReady={() => setMapReady(true)}
       >
         {/* Gate ALL map children on mapReady — adding Markers/Polylines before the
