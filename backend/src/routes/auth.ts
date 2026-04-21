@@ -151,6 +151,10 @@ async function ensureDevDriverProfile(userId: string, phone: string): Promise<vo
     // the driver goes online in the dashboard).
     location_lat:      31.9539,
     location_lng:      35.9106,
+    // Seed default rating values so the ratings display shows correctly in dev
+    // even on pre-migration rows that may have NULL in these columns.
+    average_rating:    5.00,
+    rating_count:      0,
   }, { onConflict: 'id' });
 
   if (error) {
