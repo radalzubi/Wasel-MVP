@@ -28,3 +28,12 @@ Thumbs.db
 
 # Claude Code local state
 .claude/
+
+# Ship script credentials — never commit
+.ship-secrets
+
+# Xcode build output and generated native projects
+rider/build/
+driver/build/
+rider/ios/
+driver/ios/
