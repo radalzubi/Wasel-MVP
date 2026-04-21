@@ -71,10 +71,11 @@ cd "$APP_DIR"
 # ExpoNotifications_privacy.bundle, causing "Multiple commands produce" error.
 # We use the xcodeproj gem (already installed by CocoaPods) to strip all build
 # phases from the duplicate legacy target directly in the Pods project file.
-# Use Homebrew ruby — it has the xcodeproj gem installed by CocoaPods
-RUBY_BIN="/opt/homebrew/bin/ruby"
-[[ ! -f "$RUBY_BIN" ]] && RUBY_BIN="ruby"
-"$RUBY_BIN" - "$APP_DIR/ios/Pods/Pods.xcodeproj" <<'RUBYEOF'
+# xcodeproj is bundled inside CocoaPods' own GEM_HOME, not the system gems.
+# Read the GEM_HOME from the pod launcher script so we always match the
+# installed CocoaPods version, then run system ruby with that gem path.
+COCOAPODS_GEM_HOME=$(grep -o 'GEM_HOME="[^"]*"' /opt/homebrew/bin/pod | cut -d'"' -f2)
+GEM_HOME="$COCOAPODS_GEM_HOME" ruby - "$APP_DIR/ios/Pods/Pods.xcodeproj" <<'RUBYEOF'
 require 'xcodeproj'
 path = ARGV[0]
 project = Xcodeproj::Project.open(path)
