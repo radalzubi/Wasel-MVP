@@ -204,14 +204,7 @@ router.post('/send-otp', otpLimiter, async (req, res) => {
     return res.status(429).json({ error: 'Too many OTP requests for this number. Try again later.' });
   }
 
-  // Send via WhatsApp first (dominant in Jordan/Middle East); Twilio Verify
-  // automatically falls back to SMS if WhatsApp is unavailable.
-  // If the project is using plain Twilio SMS (not Twilio Verify), the channel
-  // option is silently ignored and a standard SMS is sent instead.
-  const { error } = await supabase.auth.signInWithOtp({
-    phone,
-    options: { channel: 'whatsapp' },
-  });
+  const { error } = await supabase.auth.signInWithOtp({ phone });
   if (error) return res.status(500).json({ error: 'Failed to send OTP. Please try again.' });
 
   res.json({ message: 'OTP sent' });
