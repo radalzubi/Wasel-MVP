@@ -10,6 +10,14 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
+# Ensure Homebrew tools (pod, ruby, etc.) are on PATH — they may not be
+# present in non-interactive shells (e.g. when launched from an IDE terminal).
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
+
+# CocoaPods requires UTF-8 locale; non-interactive shells often inherit "C".
+export LANG=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
+
 APP="${1:?Usage: ./ship.sh rider  OR  ./ship.sh driver}"
 
 # ── Load credentials ──────────────────────────────────────────────────────────
@@ -104,8 +112,51 @@ project.targets.each do |t|
 end
 puts "   ✓ Set C++20 standard on all Pods targets"
 
+# Fix 3: After removing the EXNotifications-ExpoNotifications_privacy target above,
+# there is still a dangling reference to ExpoNotifications_privacy.bundle in the
+# EXNotifications target's Copy Resources build phase. Remove it so xcodebuild
+# doesn't fail with "Resource not found".
+removed_refs = 0
+project.targets.each do |t|
+  t.build_phases.each do |phase|
+    next unless phase.is_a?(Xcodeproj::Project::Object::PBXResourcesBuildPhase)
+    before = phase.files.length
+    phase.files.delete_if do |f|
+      f.file_ref&.path&.include?('ExpoNotifications_privacy.bundle')
+    end
+    removed_refs += (before - phase.files.length)
+  end
+end
+puts "   ✓ Removed #{removed_refs} dangling ExpoNotifications_privacy.bundle reference(s)"
+
 project.save
 RUBYEOF
+
+# Fix 4: CocoaPods generates Pods-<App>-resources.sh which includes a reference
+# to EXNotifications/ExpoNotifications_privacy.bundle — produced by the legacy
+# EXNotifications-ExpoNotifications_privacy target we deleted above.  That bundle
+# no longer exists, so xcodebuild errors "Resource not found".  Remove only the
+# stale EXNotifications/ entry; keep the valid ExpoNotifications/ entry.
+RESOURCES_SH=$(find "$APP_DIR/ios/Pods/Target Support Files" \
+  -name "Pods-*-resources.sh" | head -1)
+if [[ -n "$RESOURCES_SH" ]]; then
+  sed -i '' '/\/EXNotifications\/ExpoNotifications_privacy\.bundle/d' "$RESOURCES_SH"
+  echo "   ✓ Removed stale EXNotifications/ExpoNotifications_privacy.bundle from resources script"
+fi
+
+# Fix 5: fmt's consteval is broken in Apple Clang (pointer arithmetic not treated
+# as constant expressions). Directly replace FMT_CONSTEVAL consteval → constexpr.
+FMT_BASE_H="$APP_DIR/ios/Pods/fmt/include/fmt/base.h"
+if [[ -f "$FMT_BASE_H" ]]; then
+  chmod u+w "$FMT_BASE_H"
+  # Directly replace `consteval` with `constexpr` in the FMT_CONSTEVAL macro.
+  # Apple Clang (Xcode 26 beta) has a bug where consteval pointer arithmetic
+  # is rejected even in C++20 mode. constexpr compiles correctly.
+  sed -i '' -E \
+    's/#([[:space:]]*)define([[:space:]]+)FMT_CONSTEVAL([[:space:]]+)consteval/#\1define\2FMT_CONSTEVAL\3constexpr/' \
+    "$FMT_BASE_H"
+  echo "   ✓ Fix 5: Patched fmt/base.h (FMT_CONSTEVAL: consteval → constexpr)"
+fi
 
 echo "   ✓ Done"
 
@@ -138,6 +189,7 @@ xcodebuild archive \
   MARKETING_VERSION="1.0.0" \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_IDENTITY="" \
+  CLANG_CXX_LANGUAGE_STANDARD=c++20 \
   -quiet
 echo "   ✓ Archive created"
 
