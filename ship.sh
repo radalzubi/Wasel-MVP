@@ -244,10 +244,24 @@ xcrun altool --upload-app \
   --apiIssuer "$ASC_ISSUER_ID"
 
 # ── Cleanup ────────────────────────────────────────────────────────────────────
+# Use perl for fast parallel unlink instead of rm -rf — dramatically faster on
+# large Pods/DerivedData trees (100k+ files). Falls back to rm -rf if perl fails.
 echo ""
 echo "▶ Cleaning up build files"
-rm -rf "$BUILD_DIR"
-rm -rf "$APP_DIR/ios"
+fast_rm() {
+  local dir="$1"
+  if [[ -d "$dir" ]]; then
+    perl -e 'use File::Find; use POSIX;
+      my @dirs; my @files;
+      find(sub { if (-d $_) { push @dirs, $File::Find::name } else { push @files, $File::Find::name } }, $ARGV[0]);
+      unlink @files;
+      rmdir $_ for reverse sort @dirs;
+      rmdir $ARGV[0];
+    ' "$dir" 2>/dev/null || rm -rf "$dir"
+  fi
+}
+fast_rm "$BUILD_DIR"
+fast_rm "$APP_DIR/ios"
 echo "   ✓ Done"
 
 echo ""
