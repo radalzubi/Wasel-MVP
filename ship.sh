@@ -79,22 +79,32 @@ GEM_HOME="$COCOAPODS_GEM_HOME" ruby - "$APP_DIR/ios/Pods/Pods.xcodeproj" <<'RUBY
 require 'xcodeproj'
 path = ARGV[0]
 project = Xcodeproj::Project.open(path)
+
+# Fix 1: Remove duplicate EXNotifications privacy bundle target.
+# Xcode auto-generates a MkDir command for any bundle target, so we must
+# remove the entire target (not just its build phases) to stop the conflict.
 target = project.targets.find { |t| t.name == 'EXNotifications-ExpoNotifications_privacy' }
 if target
-  # Remove from the root project targets list to eliminate dangling reference
   project.root_object.targets.delete(target)
-  # Clean up all child objects before removing the target itself
   target.build_phases.each(&:remove_from_project)
   if target.build_configuration_list
     target.build_configuration_list.build_configurations.each(&:remove_from_project)
     target.build_configuration_list.remove_from_project
   end
   target.remove_from_project
-  project.save
-  puts "   ✓ Removed duplicate EXNotifications target from Pods project"
-else
-  puts "   ✓ No duplicate target found (already clean)"
+  puts "   ✓ Removed duplicate EXNotifications target"
 end
+
+# Fix 2: fmt library uses C++20 consteval — set c++20 standard on all targets
+# so the compiler accepts it. Older default (c++17) causes build errors.
+project.targets.each do |t|
+  t.build_configurations.each do |config|
+    config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++20'
+  end
+end
+puts "   ✓ Set C++20 standard on all Pods targets"
+
+project.save
 RUBYEOF
 
 echo "   ✓ Done"
