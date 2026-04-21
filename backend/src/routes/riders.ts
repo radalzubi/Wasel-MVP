@@ -11,7 +11,7 @@ const router = Router();
 router.get('/me', requireAuth, requireRider, async (req: AuthRequest, res) => {
   const { data, error } = await supabase
     .from('riders')
-    .select('id, phone, name, is_waitlist_member, waitlist_joined_at, waitlist_position, created_at')
+    .select('id, phone, name, is_waitlist_member, waitlist_joined_at, waitlist_position, average_rating, rating_count, created_at')
     .eq('id', req.userId!)
     .maybeSingle();
 

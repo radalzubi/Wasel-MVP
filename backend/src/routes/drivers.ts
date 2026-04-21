@@ -102,7 +102,7 @@ router.patch('/status', requireAuth, requireDriver, async (req: AuthRequest, res
 router.get('/me', requireAuth, requireDriver, async (req: AuthRequest, res) => {
   const { data, error } = await supabase
     .from('drivers')
-    .select('id, name, phone, vehicle_make, vehicle_model, vehicle_plate, subscription_tier, is_approved, is_online, is_available, location_lat, location_lng, created_at')
+    .select('id, name, phone, vehicle_make, vehicle_model, vehicle_plate, subscription_tier, is_approved, is_online, is_available, location_lat, location_lng, average_rating, rating_count, created_at')
     .eq('id', req.userId)
     .single();
 
@@ -230,12 +230,21 @@ router.get('/trips', requireAuth, requireDriver, async (req: AuthRequest, res) =
     .filter(t => t.completed_at && new Date(t.completed_at).toDateString() === today)
     .reduce((sum, t) => sum + Number(t.fare_amount ?? 0), 0);
 
+  // Fetch driver's current aggregate rating for the earnings summary card
+  const { data: driverProfile } = await supabase
+    .from('drivers')
+    .select('average_rating, rating_count')
+    .eq('id', req.userId!)
+    .maybeSingle();
+
   res.json({
     trips: data ?? [],
     summary: {
       total_trips:       completed.length,
       total_earnings_jd: Number(totalEarnings.toFixed(2)),
       today_earnings_jd: Number(todayEarnings.toFixed(2)),
+      average_rating:    Number(driverProfile?.average_rating ?? 5.00),
+      rating_count:      driverProfile?.rating_count ?? 0,
     },
   });
 });
