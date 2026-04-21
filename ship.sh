@@ -59,6 +59,25 @@ cd "$APP_DIR"
 EXPO_PUBLIC_API_URL="$API_URL" npx expo prebuild --platform ios --clean
 echo "   ✓ Done"
 
+# ── Fix: patch Podfile before pod install ─────────────────────────────────────
+# expo-notifications registers two CocoaPods targets that both try to build
+# the same ExpoNotifications_privacy.bundle, causing "Multiple commands produce"
+# error. We disable SKIP_INSTALL on the legacy EXNotifications variant so only
+# the canonical ExpoNotifications target produces the bundle.
+cat >> "$APP_DIR/ios/Podfile" <<'RUBY'
+
+# ship.sh patch — fix duplicate ExpoNotifications privacy bundle
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    if target.name == 'EXNotifications-ExpoNotifications_privacy'
+      target.build_configurations.each do |config|
+        config.build_settings['SKIP_INSTALL'] = 'YES'
+      end
+    end
+  end
+end
+RUBY
+
 # ── Step 2: Pod install ────────────────────────────────────────────────────────
 echo ""
 echo "▶ Step 2/5 — pod install (installs iOS dependencies)"
@@ -93,6 +112,7 @@ xcodebuild archive \
   CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
   MARKETING_VERSION="1.0.0" \
   CODE_SIGN_STYLE=Automatic \
+  CODE_SIGN_IDENTITY="Apple Distribution" \
   DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
   -quiet
 echo "   ✓ Archive created"
