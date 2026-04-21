@@ -81,9 +81,17 @@ path = ARGV[0]
 project = Xcodeproj::Project.open(path)
 target = project.targets.find { |t| t.name == 'EXNotifications-ExpoNotifications_privacy' }
 if target
+  # Remove from the root project targets list to eliminate dangling reference
+  project.root_object.targets.delete(target)
+  # Clean up all child objects before removing the target itself
   target.build_phases.each(&:remove_from_project)
+  if target.build_configuration_list
+    target.build_configuration_list.build_configurations.each(&:remove_from_project)
+    target.build_configuration_list.remove_from_project
+  end
+  target.remove_from_project
   project.save
-  puts "   ✓ Removed duplicate ExpoNotifications build phases"
+  puts "   ✓ Removed duplicate EXNotifications target from Pods project"
 else
   puts "   ✓ No duplicate target found (already clean)"
 end
