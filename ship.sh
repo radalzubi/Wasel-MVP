@@ -73,8 +73,9 @@ if [[ -z "$WORKSPACE" ]]; then
   echo "❌ Could not find .xcworkspace in $APP_DIR/ios"
   exit 1
 fi
-SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list 2>/dev/null \
-  | awk '/Schemes:/,0' | grep -v "Schemes:" | head -1 | xargs)
+# Derive scheme from workspace name — this is always the main app scheme
+# for Expo-generated projects (e.g. WaselRider.xcworkspace → WaselRider)
+SCHEME=$(basename "$WORKSPACE" .xcworkspace)
 echo "   Workspace: $(basename "$WORKSPACE")"
 echo "   Scheme:    $SCHEME"
 
@@ -86,6 +87,7 @@ xcodebuild archive \
   -workspace "$WORKSPACE" \
   -scheme "$SCHEME" \
   -configuration Release \
+  -destination "generic/platform=iOS" \
   -archivePath "$BUILD_DIR/$SCHEME.xcarchive" \
   -allowProvisioningUpdates \
   CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
