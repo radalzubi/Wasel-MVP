@@ -115,6 +115,7 @@ xcodebuild archive \
   -configuration Release \
   -destination "generic/platform=iOS" \
   -archivePath "$BUILD_DIR/$SCHEME.xcarchive" \
+  -derivedDataPath "$BUILD_DIR/DerivedData" \
   CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
   MARKETING_VERSION="1.0.0" \
   CODE_SIGNING_REQUIRED=NO \
