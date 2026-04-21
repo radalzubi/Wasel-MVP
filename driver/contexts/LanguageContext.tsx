@@ -170,6 +170,16 @@ const translations: Record<string, Record<Language, string>> = {
   fareIsYours: { en: 'Every fare goes directly to you', ar: 'كل أجرة تذهب مباشرة إليك' },
   todayEarnings: { en: 'Today', ar: 'اليوم' },
   todayTrips: { en: 'Trips', ar: 'الرحلات' },
+
+  // Earnings screen
+  earnings:    { en: 'Earnings',               ar: 'الأرباح' },
+  today:       { en: 'Today',                  ar: 'اليوم' },
+  allTime:     { en: 'All time',               ar: 'الإجمالي' },
+  tripsCount:  { en: 'Trips',                  ar: 'الرحلات' },
+  yourRating:  { en: 'Rating',                 ar: 'تقييمك' },
+  noTripsYet:  { en: 'No completed trips yet', ar: 'لا توجد رحلات مكتملة بعد' },
+  tripPickup:  { en: 'Pickup',                 ar: 'الانطلاق' },
+  tripDropoff: { en: 'Dropoff',                ar: 'الوجهة' },
 };
 
 const LanguageContext = createContext<LanguageContextType>({
