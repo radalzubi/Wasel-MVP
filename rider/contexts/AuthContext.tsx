@@ -45,22 +45,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const tokenRef = useRef<string | null>(null);
 
   useEffect(() => {
-    // Prime tokenRef synchronously from storage so getAccessToken() returns a
-    // value even before onAuthStateChange fires. Do NOT call setLoading(false)
-    // here — only onAuthStateChange is the authoritative loading source.
-    // Calling setLoading(false) in both places creates a race where the app
-    // may render authenticated screens with a stale session object, then flip
-    // back to null when onAuthStateChange fires with the real value.
+    // Prime tokenRef, session, user, and loading from storage immediately.
+    // This guarantees setLoading(false) is called even if onAuthStateChange
+    // fires TOKEN_REFRESHED as the first event (token expired at startup),
+    // which has an early return that skips setLoading — without this call the
+    // app would hang on the loading spinner until iOS watchdog kills it (~20s).
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!tokenRef.current) {
-        tokenRef.current = session?.access_token ?? null;
-      }
+      tokenRef.current = session?.access_token ?? null;
+      setSession(session);
+      setUser(session?.user ?? null);
+      setLoading(false);
     });
 
-    // Keep ref + state in sync with every auth event. TOKEN_REFRESHED only
-    // rotates the JWT — we must update tokenRef but skip setUser so
-    // [user]-keyed effects don't re-run hourly (prevents push-token churn,
-    // profile re-fetch, etc.).
+    // Keep ref + state in sync with every subsequent auth event.
+    // TOKEN_REFRESHED only rotates the JWT — update tokenRef and session but
+    // skip setUser so [user?.id]-keyed effects don't re-run hourly (prevents
+    // push-token churn, profile re-fetch, etc.).
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, nextSession) => {
       tokenRef.current = nextSession?.access_token ?? null;
       if (event === 'TOKEN_REFRESHED') {

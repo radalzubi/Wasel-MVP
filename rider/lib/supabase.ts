@@ -5,14 +5,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
-// Fail loudly at import time with a clear message instead of letting createClient
-// crash deep inside its own code with "undefined is not a string" — that form of
-// crash presents as an instant dismiss back to the iOS home screen with no RedBox,
-// which looks identical to a native crash and wastes hours of debugging.
+// Log a clear warning if env vars are missing rather than throwing at module
+// scope. A module-level throw bypasses React's ErrorBoundary entirely — it
+// crashes the JS runtime before any component mounts, showing a blank white
+// screen on iOS with no recovery path. console.error gives the same
+// diagnostic signal in Metro/Flipper without killing the app.
 if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error(
+  console.error(
     '[rider/supabase] Missing EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY. ' +
-    'Check rider/.env is present and that `expo start` picked it up (env: load .env line should appear in Metro output).'
+    'Check rider/.env is present and that `expo start` picked it up.'
   );
 }
 
@@ -20,7 +21,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
 // exceed the 2048-byte iOS Keychain value limit, causing SecureStore to throw
 // and the SDK to fire SIGNED_OUT immediately after login. AsyncStorage has no
 // size limit and is standard for React Native Supabase apps.
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+export const supabase = createClient(supabaseUrl ?? '', supabaseAnonKey ?? '', {
   auth: {
     storage: AsyncStorage,
     autoRefreshToken: true,
