@@ -21,19 +21,25 @@ type Role = 'rider' | 'driver';
  * @param accessToken Supabase session access token
  */
 export async function registerPushToken(role: Role, accessToken: string): Promise<void> {
-  // Set the foreground handler before requesting permissions so that any
-  // permission-grant notification is handled immediately.
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-    }),
-  });
-
+  // EVERYTHING below is inside the try/catch — including setNotificationHandler.
+  // An earlier version placed setNotificationHandler OUTSIDE the try. That
+  // one line is the only reason push setup could take the boot down: on rare
+  // iOS timing, the native notification centre isn't fully ready when the JS
+  // bundle evaluates this function, and setNotificationHandler rejects with
+  // a synchronous native-bridge error that isn't a Promise rejection — it's
+  // an immediate throw that bypasses the caller's .catch(). Wrapping the
+  // whole function makes registerPushToken trivially safe to fire-and-forget.
   try {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+      }),
+    });
+
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
 

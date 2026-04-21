@@ -21,6 +21,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { supabase } from '../../lib/supabase';
 import { useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { useStartupHealthCtx } from './_layout';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -65,6 +66,27 @@ interface RiderProfile { is_waitlist_member?: boolean; }
 
 export default function HomeScreen() {
   const { user, getAccessToken } = useAuth();
+  // Crash-loop breaker context from (app)/_layout.tsx.
+  // - shouldSkipRestore: true when the app just entered via the recovery
+  //   shell. In that case we must NOT call /api/trips/active — that fetch
+  //   is the exact path that put us in the crash loop.
+  // - markBootstrapDone: call once the bootstrap decision is complete so the
+  //   healthy-checkpoint timer starts.
+  const { shouldSkipRestore, markBootstrapDone } = useStartupHealthCtx();
+
+  // Map mount is separated from screen mount: we show a black shell first
+  // (no MapView, no Markers, no native GL) and only mount the map once
+  // bootstrap has decided whether to restore a trip or not. Without this
+  // split, any crash in the bootstrap sequence would be compounded by the
+  // simultaneous MapView initialisation on the same frame.
+  const [shouldMountMap, setShouldMountMap] = useState(false);
+
+  // Epoch counter for the destination-search context. Every time the user
+  // changes the active search context (opens the modal, picks a different
+  // suggestion, clears a field) this bumps. Delayed setTimeout fits capture
+  // the epoch at schedule time and silently drop if the epoch has moved —
+  // so a stale fit can never snap the map to an abandoned search result.
+  const searchEpochRef = useRef(0);
 
   const { t } = useLanguage();
   const mapRef = useRef<MapView>(null);
@@ -234,8 +256,15 @@ export default function HomeScreen() {
           pickupCoords.latitude, pickupCoords.longitude,
           coords.latitude, coords.longitude,
         );
+        // Bump the search epoch so any previous stale setTimeout fit (from
+        // an earlier suggestion the user abandoned) aborts instead of firing.
+        // The fit we schedule below captures the new epoch and skips if it
+        // moves again before the 500 ms delay elapses.
+        searchEpochRef.current += 1;
+        const fitEpoch = searchEpochRef.current;
         setTimeout(() => {
           if (!isMounted.current) return;
+          if (searchEpochRef.current !== fitEpoch) return;
           if (!mapReadyRef.current || !mapRef.current) return;
           try {
             mapRef.current.fitToCoordinates([pickupCoords, coords], {
@@ -364,6 +393,17 @@ export default function HomeScreen() {
   // in-progress ride must use the Cancel button in the trip panel.
   useEffect(() => {
     if (!user) return;
+
+    // Crash-loop breaker: if we just exited recovery mode (or we're in it),
+    // do NOT call /api/trips/active. A previous launch crashed trying to
+    // restore; starting clean is the escape hatch. Still mark bootstrap
+    // done and mount the map so the user has a functional idle home screen.
+    if (shouldSkipRestore) {
+      markBootstrapDone();
+      setShouldMountMap(true);
+      return;
+    }
+
     (async () => {
       try {
         const token = getAccessToken();
@@ -444,8 +484,18 @@ export default function HomeScreen() {
           }).catch(() => {}); // non-fatal — UI stays idle either way
         }
       } catch { /* non-fatal — bootstrap failure does not block the UI */ }
+      finally {
+        // Whatever happened above (restore succeeded, failed, threw, timed
+        // out) — the bootstrap decision has been made. Mount the map now
+        // and tell the crash-loop breaker that bootstrap is done so it can
+        // start the healthy-checkpoint timer.
+        if (isMounted.current) {
+          setShouldMountMap(true);
+          markBootstrapDone();
+        }
+      }
     })();
-  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user?.id, shouldSkipRestore]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Trip Realtime subscription ────────────────────────────────────────
   useEffect(() => {
@@ -770,8 +820,14 @@ export default function HomeScreen() {
           pickupCoords.latitude, pickupCoords.longitude,
           coords.latitude, coords.longitude,
         );
+        // Bump the search epoch: if the user immediately picks a different
+        // suggestion before the 500 ms delay elapses, the stale timer will
+        // see the epoch moved and skip its fit.
+        searchEpochRef.current += 1;
+        const fitEpoch = searchEpochRef.current;
         setTimeout(() => {
           if (!isMounted.current) return;
+          if (searchEpochRef.current !== fitEpoch) return;
           if (!mapReadyRef.current || !mapRef.current) return;
           try {
             mapRef.current.fitToCoordinates([pickupCoords, coords], {
@@ -1062,7 +1118,15 @@ export default function HomeScreen() {
   return (
     <View style={s.container}>
 
-      {/* ── Map — always fills the screen behind all panels ─────────── */}
+      {/* ── Map — deferred mount ─────────────────────────────────────── */}
+      {/* Separates "screen mounted" from "map mounted". The map is the
+          expensive and native-heavy part; delaying it until after the
+          bootstrap decision (restore vs idle, signed-in vs not) keeps the
+          first frames cheap and means a bootstrap crash does NOT land on
+          the same frame as a MapView init. While !shouldMountMap we render
+          a pure black absoluteFill so the background is visually identical. */}
+      {!shouldMountMap && <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#0A0A0A' }]} />}
+      {shouldMountMap && (
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
@@ -1131,6 +1195,7 @@ export default function HomeScreen() {
           )
         )))}
       </MapView>
+      )}
 
       {/* ── Top bar ───────────────────────────────────────────────────── */}
       <SafeAreaView style={s.topBar} edges={['top']}>

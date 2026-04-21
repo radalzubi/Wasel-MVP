@@ -7,8 +7,13 @@
 //      hoisted workspace-root copy first
 //
 // Docs: https://docs.expo.dev/guides/monorepos/
+// Metro config for the driver app inside the Wasel npm workspace.
+// See rider/metro.config.js for the full singleton-resolution rationale —
+// both apps use the identical strategy (prefer workspace-root, explicit
+// fs.existsSync probe, no throw/catch control flow).
 const { getDefaultConfig } = require('expo/metro-config');
 const path = require('path');
+const fs = require('fs');
 
 const projectRoot = __dirname;
 const workspaceRoot = path.resolve(projectRoot, '..');
@@ -20,22 +25,10 @@ const config = getDefaultConfig(projectRoot);
 // and makes Metro's initial file scan take several minutes.
 config.watchFolders = [...(config.watchFolders || []), path.resolve(workspaceRoot, 'packages')];
 config.resolver.nodeModulesPaths = [
-  path.resolve(projectRoot, 'node_modules'),
   path.resolve(workspaceRoot, 'node_modules'),
+  path.resolve(projectRoot, 'node_modules'),
 ];
 
-// Guarantee a single React/RN instance across the monorepo.
-// Without this, Metro's traversal finds the npm-hoisted copy at the workspace
-// root (react@19.2.5) before @wasel/shared can resolve to the app's own copy
-// (react@19.1.0) — producing the "useState of null / invalid hook call" crash.
-//
-// resolveRequest intercepts EVERY module resolution call before traversal,
-// unlike extraNodeModules which is only a fallback and does not override
-// traversal-based resolution from files inside packages/shared/.
-//
-// Also covers react/jsx-runtime and react/jsx-dev-runtime which are emitted
-// by the React 17+ automatic JSX transform and would otherwise resolve to the
-// wrong copy as well.
 const SINGLETON_MODULES = [
   'react',
   'react-native',
@@ -45,15 +38,15 @@ const SINGLETON_MODULES = [
 
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (SINGLETON_MODULES.includes(moduleName)) {
-    try {
+    const pkgRoot = moduleName.split('/')[0];
+    const candidatePkgJson = path.join(workspaceRoot, 'node_modules', pkgRoot, 'package.json');
+    if (fs.existsSync(candidatePkgJson)) {
       return {
         filePath: require.resolve(moduleName, {
-          paths: [path.resolve(projectRoot, 'node_modules')],
+          paths: [path.join(workspaceRoot, 'node_modules')],
         }),
         type: 'sourceFile',
       };
-    } catch {
-      // Fall through to normal resolution if local copy doesn't exist
     }
   }
   return context.resolveRequest(context, moduleName, platform);

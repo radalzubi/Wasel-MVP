@@ -59,7 +59,12 @@ function PushRegistration() {
     if (!user?.id) return;
     const token = getAccessToken();
     if (!token) return;
-    registerPushToken('rider', token);
+    // Fire-and-forget. Push setup is strictly best-effort — a rejection
+    // (network, permission denied, bridge not ready) must never surface as
+    // an unhandled promise rejection that could take the JS runtime down
+    // during startup. The .catch is belt-and-suspenders alongside the
+    // try/catch inside registerPushToken itself.
+    registerPushToken('rider', token).catch(() => {});
   }, [user?.id, getAccessToken]);
 
   return null;

@@ -56,7 +56,8 @@ function PushRegistration() {
     if (!user?.id) return;
     const token = getAccessToken();
     if (!token) return;
-    registerPushToken('driver', token);
+    // See rider/_layout.tsx for rationale — push setup is fire-and-forget.
+    registerPushToken('driver', token).catch(() => {});
   }, [user?.id, getAccessToken]);
 
   return null;

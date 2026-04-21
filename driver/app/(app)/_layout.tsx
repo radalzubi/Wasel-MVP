@@ -1,15 +1,48 @@
+import React, { createContext, useContext } from 'react';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { View, ActivityIndicator } from 'react-native';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ErrorBoundary } from '@wasel/shared';
+import { ErrorBoundary, RecoveryShell, useStartupHealth } from '@wasel/shared';
+
+// See rider/app/(app)/_layout.tsx for detailed rationale. Same breaker,
+// different appName so the recovery UI is unambiguous.
+interface StartupHealthCtx {
+  shouldSkipRestore: boolean;
+  markBootstrapDone: () => void;
+}
+const StartupHealthContext = createContext<StartupHealthCtx>({
+  shouldSkipRestore: false,
+  markBootstrapDone: () => {},
+});
+export function useStartupHealthCtx() { return useContext(StartupHealthContext); }
 
 export default function AppLayout() {
   const { t } = useLanguage();
   // bottom inset = home-indicator height (34pt on iPhone X+, 0 on older/Android)
   const { bottom } = useSafeAreaInsets();
+  const health = useStartupHealth();
+
+  if (health.bootState === 'recovery') {
+    return <RecoveryShell appName="Wasel Driver" onContinue={health.exitRecoveryMode} />;
+  }
+
+  if (health.bootState === 'booting') {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#0A0A0A', justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator color="#F5A623" />
+      </View>
+    );
+  }
 
   return (
+    <StartupHealthContext.Provider
+      value={{
+        shouldSkipRestore: health.shouldSkipRestore,
+        markBootstrapDone: health.markBootstrapDone,
+      }}
+    >
     <ErrorBoundary>
     <Tabs
       screenOptions={{
@@ -67,5 +100,6 @@ export default function AppLayout() {
       />
     </Tabs>
     </ErrorBoundary>
+    </StartupHealthContext.Provider>
   );
 }

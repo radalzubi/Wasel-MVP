@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { supabase } from '../../lib/supabase';
+import { useStartupHealthCtx } from './_layout';
 
 // Expo Go (storeClient) has a fixed precompiled binary — Google Maps SDK,
 // background location, and foreground services are not included.
@@ -121,6 +122,14 @@ const TRIP_STATUS_LABEL: Record<string, string> = {
 export default function DashboardScreen() {
   const { user, getAccessToken } = useAuth();
   const { t } = useLanguage();
+  // Crash-loop breaker context: see rider/app/(app)/home.tsx for full rationale.
+  // shouldSkipRestore = true means skip /api/trips/driver-active on this boot.
+  const { shouldSkipRestore, markBootstrapDone } = useStartupHealthCtx();
+  // Separates "screen mounted" from "map mounted". We render a pure black
+  // absoluteFill first and only mount the MapView after bootstrap completes,
+  // so that a crash during bootstrap doesn't land on the same frame as a
+  // MapView native init.
+  const [shouldMountMap, setShouldMountMap] = useState(false);
   const mapRef = useRef<MapView>(null);
   const isMounted = useRef(true);
 
@@ -290,6 +299,17 @@ export default function DashboardScreen() {
   // PATCH is never issued twice in conflicting directions during the same boot.
   useEffect(() => {
     if (!user) return;
+
+    // Crash-loop breaker short-circuit: if we just exited recovery (or are
+    // in it), do NOT call /api/trips/driver-active. That restore path is
+    // the exact surface a previous launch crashed on. Mount the map and
+    // mark bootstrap done so the user has a functional offline dashboard.
+    if (shouldSkipRestore) {
+      markBootstrapDone();
+      setShouldMountMap(true);
+      return;
+    }
+
     (async () => {
       try {
         const token = await getToken();
@@ -358,8 +378,17 @@ export default function DashboardScreen() {
           }).catch(() => {});
         }
       } catch { /* non-fatal — bootstrap failure does not block the UI */ }
+      finally {
+        // Whatever happened above, the bootstrap decision is final. Mount
+        // the map and tell the crash-loop breaker bootstrap is complete so
+        // the healthy-checkpoint timer can start.
+        if (isMounted.current) {
+          setShouldMountMap(true);
+          markBootstrapDone();
+        }
+      }
     })();
-  }, [user, getToken]);
+  }, [user, getToken, shouldSkipRestore]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Initial location on mount ─────────────────────────────────────────────
   useEffect(() => {
@@ -987,6 +1016,12 @@ export default function DashboardScreen() {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
+      {/* Deferred MapView mount: show a pure black fill until bootstrap has
+          completed (shouldMountMap = true). Keeps first-frame work minimal
+          and avoids compounding a bootstrap crash with a simultaneous
+          MapView native init on the same frame. */}
+      {!shouldMountMap && <View style={[styles.map, { backgroundColor: '#0A0A0A' }]} />}
+      {shouldMountMap && (
       <MapView
         ref={mapRef}
         style={styles.map}
@@ -1042,6 +1077,7 @@ export default function DashboardScreen() {
           />
         )}
       </MapView>
+      )}
 
       {/* Top bar */}
       <SafeAreaView style={styles.topBar} edges={['top']}>
