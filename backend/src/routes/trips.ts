@@ -642,12 +642,51 @@ router.post('/:id/rate', requireAuth, async (req: AuthRequest, res) => {
     return res.status(409).json({ error: 'Already rated' });
   }
 
-  const { error } = await supabase
+  // 1. Write the per-trip rating
+  const { error: writeErr } = await supabase
     .from('trips')
     .update({ [column]: parsed.data.rating })
     .eq('id', req.params.id);
 
-  if (error) return res.status(500).json({ error: 'Failed to save rating' });
+  if (writeErr) return res.status(500).json({ error: 'Failed to save rating' });
+
+  // 2. Recompute and persist the aggregate on the profile table.
+  //    Recalculate from source-of-truth (trips table) rather than doing
+  //    +1 increments so the aggregate stays accurate even after manual corrections.
+  if (parsed.data.ratee === 'driver' && trip.driver_id) {
+    const { data: agg } = await supabase
+      .from('trips')
+      .select('driver_rating')
+      .eq('driver_id', trip.driver_id)
+      .not('driver_rating', 'is', null);
+
+    if (agg?.length) {
+      const avg = agg.reduce((s, r) => s + (r.driver_rating as number), 0) / agg.length;
+      const { error: driverAggErr } = await supabase.from('drivers').update({
+        average_rating: Number(avg.toFixed(2)),
+        rating_count:   agg.length,
+      }).eq('id', trip.driver_id);
+      if (driverAggErr) console.error('[trips/rate] failed to update driver aggregate:', driverAggErr.message);
+    }
+  }
+
+  if (parsed.data.ratee === 'rider' && trip.rider_id) {
+    const { data: agg } = await supabase
+      .from('trips')
+      .select('rider_rating')
+      .eq('rider_id', trip.rider_id)
+      .not('rider_rating', 'is', null);
+
+    if (agg?.length) {
+      const avg = agg.reduce((s, r) => s + (r.rider_rating as number), 0) / agg.length;
+      const { error: riderAggErr } = await supabase.from('riders').update({
+        average_rating: Number(avg.toFixed(2)),
+        rating_count:   agg.length,
+      }).eq('id', trip.rider_id);
+      if (riderAggErr) console.error('[trips/rate] failed to update rider aggregate:', riderAggErr.message);
+    }
+  }
+
   res.json({ ok: true });
 });
 
