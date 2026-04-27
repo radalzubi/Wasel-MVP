@@ -315,6 +315,131 @@ body::after {
 /* ── g3c ─────────────────────────────────────────────────────────── */
 .g3c { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
 
+/* ── Persistent 3D Phone ─────────────────────────────────────────── */
+/* ph-stage: fixed anchor, perspective container                      */
+#ph-stage {
+  position: fixed;
+  right: 68px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 50;
+  perspective: 1100px;
+  pointer-events: none;
+  /* hide on anything narrower than the safe threshold */
+  display: none;
+}
+@media (min-width: 1280px) {
+  #ph-stage { display: block; }
+  /* push slide content left so phone never overlaps text */
+  .slide { padding-right: 340px; }
+}
+
+/* ph-float: handles only the vertical bob — CSS keyframes */
+#ph-float {
+  animation: ph-bob 5.5s ease-in-out infinite;
+}
+@keyframes ph-bob {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-16px); }
+}
+
+/* ph-inner: the phone object — anime.js controls 3D tilt/flip here */
+#ph-inner {
+  width: 226px;
+  height: 478px;
+  position: relative;
+  transform-style: preserve-3d;
+  /* initial tilt */
+  transform: rotateY(-18deg) rotateX(5deg);
+  filter:
+    drop-shadow(0 60px 120px rgba(0,0,0,0.85))
+    drop-shadow(0 0 80px rgba(245,166,35,0.08));
+}
+
+/* glow disc behind the phone */
+.ph-glow {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 320px; height: 320px;
+  transform: translate(-50%,-50%);
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(245,166,35,0.28) 0%, transparent 70%);
+  filter: blur(36px);
+  z-index: -1;
+  transition: background 1.4s ease;
+}
+
+/* titanium body */
+.ph-body {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(155deg, #3D3D3F 0%, #1C1C1E 55%, #2B2B2D 100%);
+  border-radius: 46px;
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,0.13),
+    inset 0 -2px 0 rgba(255,255,255,0.05),
+    0 0 0 1px rgba(0,0,0,0.5);
+}
+
+/* screen area */
+.ph-screen {
+  position: absolute;
+  top: 11px; left: 7px; right: 7px; bottom: 11px;
+  background: #000;
+  border-radius: 38px;
+  overflow: hidden;
+}
+
+/* Dynamic Island */
+.ph-island {
+  position: absolute;
+  top: 13px; left: 50%;
+  transform: translateX(-50%);
+  width: 88px; height: 26px;
+  background: #000;
+  border-radius: 20px;
+  z-index: 5;
+}
+
+/* screenshot fills screen */
+#ph-img {
+  position: absolute;
+  inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  object-position: top;
+  display: block;
+}
+
+/* home bar */
+.ph-bar {
+  position: absolute;
+  bottom: 9px; left: 50%;
+  transform: translateX(-50%);
+  width: 108px; height: 5px;
+  background: rgba(255,255,255,0.28);
+  border-radius: 4px;
+  z-index: 5;
+}
+
+/* side buttons — positioned on #ph-inner, not inside .ph-body */
+.ph-btn {
+  position: absolute;
+  background: linear-gradient(180deg, #3A3A3C, #2A2A2C);
+  border-radius: 3px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.1);
+}
+/* Power (right) */
+.ph-btn-r  { right: -3px; top: 140px; width: 3px; height: 70px; border-radius: 0 3px 3px 0; }
+/* Action (left top) */
+.ph-btn-l1 { left: -3px;  top:  96px; width: 3px; height: 26px; border-radius: 3px 0 0 3px; }
+/* Vol + */
+.ph-btn-l2 { left: -3px;  top: 142px; width: 3px; height: 52px; border-radius: 3px 0 0 3px; }
+/* Vol - */
+.ph-btn-l3 { left: -3px;  top: 206px; width: 3px; height: 52px; border-radius: 3px 0 0 3px; }
+
 /* ════════════════════════════════════════════════════════════════════
    MOBILE — iPhone and small screens
 ════════════════════════════════════════════════════════════════════ */
@@ -428,6 +553,26 @@ body::after {
 
 <canvas id="orbs"></canvas>
 <nav id="nav"></nav>
+
+<!-- ── Persistent 3D Phone ──────────────────────────────────────── -->
+<div id="ph-stage">
+  <div id="ph-float">
+    <div id="ph-inner">
+      <div class="ph-glow" id="ph-glow"></div>
+      <div class="ph-body">
+        <div class="ph-screen">
+          <div class="ph-island"></div>
+          <img id="ph-img" src="IMG_8981.PNG" alt="" draggable="false" />
+          <div class="ph-bar"></div>
+        </div>
+      </div>
+      <div class="ph-btn ph-btn-r"></div>
+      <div class="ph-btn ph-btn-l1"></div>
+      <div class="ph-btn ph-btn-l2"></div>
+      <div class="ph-btn ph-btn-l3"></div>
+    </div>
+  </div>
+</div>
 
 <!-- ══════════════════ 01 HERO ═════════════════════════════════════ -->
 <section class="slide active" id="s0">
@@ -884,6 +1029,72 @@ body::after {
     }
   }
 
+  /* ── 3D Phone ────────────────────────────────────────────────────── */
+  /* One screenshot + glow colour per slide                            */
+  var PH_SCREENS = [
+    'IMG_8981.PNG',  /* s0 Hero      — rider map home       */
+    'IMG_8984.PNG',  /* s1 Problem   — driver trip request  */
+    'IMG_8981.PNG',  /* s2 Solution  — wasel home           */
+    'IMG_8984.PNG',  /* s3 BMP       — dispatch moment      */
+    'IMG_8982.PNG',  /* s4 Product   — trip in progress     */
+    'IMG_8983.PNG',  /* s5 Business  — earnings screen      */
+    'IMG_8981.PNG',  /* s6 Market    — map of Amman         */
+    'IMG_8983.PNG',  /* s7 Traction  — stats / earnings     */
+    'IMG_8985.PNG',  /* s8 Ask       — driver profile       */
+  ];
+  var PH_GLOWS = [
+    'rgba(245,166,35,0.32)',   /* hero     — amber            */
+    'rgba(255,59,48,0.22)',    /* problem  — red              */
+    'rgba(52,199,89,0.22)',    /* solution — green            */
+    'rgba(139,92,246,0.28)',   /* BMP      — purple           */
+    'rgba(245,166,35,0.22)',   /* product  — amber            */
+    'rgba(255,214,0,0.22)',    /* tiers    — gold             */
+    'rgba(245,166,35,0.22)',   /* market   — amber            */
+    'rgba(52,199,89,0.22)',    /* traction — green            */
+    'rgba(245,166,35,0.32)',   /* ask      — amber            */
+  ];
+
+  var phInner = document.getElementById('ph-inner');
+  var phImg   = document.getElementById('ph-img');
+  var phGlow  = document.getElementById('ph-glow');
+  var phBusy  = false;
+
+  function transitionPhone(newIdx) {
+    if (!phInner || !phImg) return;
+
+    /* ── Flip out ── */
+    phBusy = true;
+    anime({
+      targets: phInner,
+      rotateY: ['-18deg', '85deg'],
+      rotateX: ['5deg',   '-6deg'],
+      scale:   [1, 0.88],
+      opacity: [1, 0],
+      duration: 340,
+      easing: 'easeInCubic',
+      complete: function () {
+        /* swap content at the invisible peak */
+        phImg.src = PH_SCREENS[newIdx];
+        if (phGlow) {
+          var c = PH_GLOWS[newIdx];
+          phGlow.style.background =
+            'radial-gradient(ellipse, ' + c + ' 0%, transparent 70%)';
+        }
+        /* ── Flip in ── */
+        anime({
+          targets: phInner,
+          rotateY: ['-85deg', '-18deg'],
+          rotateX: ['6deg',    '5deg'],
+          scale:   [0.88, 1],
+          opacity: [0, 1],
+          duration: 480,
+          easing: 'easeOutCubic',
+          complete: function () { phBusy = false; },
+        });
+      },
+    });
+  }
+
   /* ── Transition ──────────────────────────────────────────────────── */
   function go(idx) {
     if (idx === current || locked || idx < 0 || idx >= total) return;
@@ -892,6 +1103,9 @@ body::after {
     var leaving  = slides[current];
     var entering = slides[idx];
     var dir = idx > current ? 1 : -1;
+
+    /* 3D phone flip */
+    transitionPhone(idx);
 
     /* Stop floating phones on leaving */
     Array.from(leaving.querySelectorAll('.pwrap')).forEach(function (p) { p.classList.remove('floating'); });
