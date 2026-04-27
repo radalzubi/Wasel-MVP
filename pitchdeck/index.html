@@ -7,6 +7,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <title>واصل — Investor Deck 2026</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -315,130 +316,19 @@ body::after {
 /* ── g3c ─────────────────────────────────────────────────────────── */
 .g3c { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
 
-/* ── Persistent 3D Phone ─────────────────────────────────────────── */
-/* ph-stage: fixed anchor, perspective container                      */
-#ph-stage {
+/* ── Three.js 3D canvas ───────────────────────────────────────────── */
+#canvas3d {
   position: fixed;
-  right: 68px;
-  top: 50%;
-  transform: translateY(-50%);
+  right: 0; top: 0;
+  width: 460px; height: 100%;
   z-index: 50;
-  perspective: 1100px;
   pointer-events: none;
-  /* hide on anything narrower than the safe threshold */
   display: none;
 }
 @media (min-width: 1280px) {
-  #ph-stage { display: block; }
-  /* push slide content left so phone never overlaps text */
-  .slide { padding-right: 340px; }
+  #canvas3d { display: block; }
+  .slide { padding-right: 500px; }
 }
-
-/* ph-float: handles only the vertical bob — CSS keyframes */
-#ph-float {
-  animation: ph-bob 5.5s ease-in-out infinite;
-}
-@keyframes ph-bob {
-  0%, 100% { transform: translateY(0); }
-  50%       { transform: translateY(-16px); }
-}
-
-/* ph-inner: the phone object — anime.js controls 3D tilt/flip here */
-#ph-inner {
-  width: 226px;
-  height: 478px;
-  position: relative;
-  transform-style: preserve-3d;
-  /* initial tilt */
-  transform: rotateY(-18deg) rotateX(5deg);
-  filter:
-    drop-shadow(0 60px 120px rgba(0,0,0,0.85))
-    drop-shadow(0 0 80px rgba(245,166,35,0.08));
-}
-
-/* glow disc behind the phone */
-.ph-glow {
-  position: absolute;
-  top: 50%; left: 50%;
-  width: 320px; height: 320px;
-  transform: translate(-50%,-50%);
-  border-radius: 50%;
-  background: radial-gradient(ellipse, rgba(245,166,35,0.28) 0%, transparent 70%);
-  filter: blur(36px);
-  z-index: -1;
-  transition: background 1.4s ease;
-}
-
-/* titanium body */
-.ph-body {
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(155deg, #3D3D3F 0%, #1C1C1E 55%, #2B2B2D 100%);
-  border-radius: 46px;
-  position: relative;
-  overflow: hidden;
-  box-shadow:
-    inset 0 0 0 1px rgba(255,255,255,0.13),
-    inset 0 -2px 0 rgba(255,255,255,0.05),
-    0 0 0 1px rgba(0,0,0,0.5);
-}
-
-/* screen area */
-.ph-screen {
-  position: absolute;
-  top: 11px; left: 7px; right: 7px; bottom: 11px;
-  background: #000;
-  border-radius: 38px;
-  overflow: hidden;
-}
-
-/* Dynamic Island */
-.ph-island {
-  position: absolute;
-  top: 13px; left: 50%;
-  transform: translateX(-50%);
-  width: 88px; height: 26px;
-  background: #000;
-  border-radius: 20px;
-  z-index: 5;
-}
-
-/* screenshot fills screen */
-#ph-img {
-  position: absolute;
-  inset: 0;
-  width: 100%; height: 100%;
-  object-fit: cover;
-  object-position: top;
-  display: block;
-}
-
-/* home bar */
-.ph-bar {
-  position: absolute;
-  bottom: 9px; left: 50%;
-  transform: translateX(-50%);
-  width: 108px; height: 5px;
-  background: rgba(255,255,255,0.28);
-  border-radius: 4px;
-  z-index: 5;
-}
-
-/* side buttons — positioned on #ph-inner, not inside .ph-body */
-.ph-btn {
-  position: absolute;
-  background: linear-gradient(180deg, #3A3A3C, #2A2A2C);
-  border-radius: 3px;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.1);
-}
-/* Power (right) */
-.ph-btn-r  { right: -3px; top: 140px; width: 3px; height: 70px; border-radius: 0 3px 3px 0; }
-/* Action (left top) */
-.ph-btn-l1 { left: -3px;  top:  96px; width: 3px; height: 26px; border-radius: 3px 0 0 3px; }
-/* Vol + */
-.ph-btn-l2 { left: -3px;  top: 142px; width: 3px; height: 52px; border-radius: 3px 0 0 3px; }
-/* Vol - */
-.ph-btn-l3 { left: -3px;  top: 206px; width: 3px; height: 52px; border-radius: 3px 0 0 3px; }
 
 /* ════════════════════════════════════════════════════════════════════
    MOBILE — iPhone and small screens
@@ -554,25 +444,7 @@ body::after {
 <canvas id="orbs"></canvas>
 <nav id="nav"></nav>
 
-<!-- ── Persistent 3D Phone ──────────────────────────────────────── -->
-<div id="ph-stage">
-  <div id="ph-float">
-    <div id="ph-inner">
-      <div class="ph-glow" id="ph-glow"></div>
-      <div class="ph-body">
-        <div class="ph-screen">
-          <div class="ph-island"></div>
-          <img id="ph-img" src="IMG_8981.PNG" alt="" draggable="false" />
-          <div class="ph-bar"></div>
-        </div>
-      </div>
-      <div class="ph-btn ph-btn-r"></div>
-      <div class="ph-btn ph-btn-l1"></div>
-      <div class="ph-btn ph-btn-l2"></div>
-      <div class="ph-btn ph-btn-l3"></div>
-    </div>
-  </div>
-</div>
+<canvas id="canvas3d"></canvas>
 
 <!-- ══════════════════ 01 HERO ═════════════════════════════════════ -->
 <section class="slide active" id="s0">
@@ -1029,72 +901,6 @@ body::after {
     }
   }
 
-  /* ── 3D Phone ────────────────────────────────────────────────────── */
-  /* One screenshot + glow colour per slide                            */
-  var PH_SCREENS = [
-    'IMG_8981.PNG',  /* s0 Hero      — rider map home       */
-    'IMG_8984.PNG',  /* s1 Problem   — driver trip request  */
-    'IMG_8981.PNG',  /* s2 Solution  — wasel home           */
-    'IMG_8984.PNG',  /* s3 BMP       — dispatch moment      */
-    'IMG_8982.PNG',  /* s4 Product   — trip in progress     */
-    'IMG_8983.PNG',  /* s5 Business  — earnings screen      */
-    'IMG_8981.PNG',  /* s6 Market    — map of Amman         */
-    'IMG_8983.PNG',  /* s7 Traction  — stats / earnings     */
-    'IMG_8985.PNG',  /* s8 Ask       — driver profile       */
-  ];
-  var PH_GLOWS = [
-    'rgba(245,166,35,0.32)',   /* hero     — amber            */
-    'rgba(255,59,48,0.22)',    /* problem  — red              */
-    'rgba(52,199,89,0.22)',    /* solution — green            */
-    'rgba(139,92,246,0.28)',   /* BMP      — purple           */
-    'rgba(245,166,35,0.22)',   /* product  — amber            */
-    'rgba(255,214,0,0.22)',    /* tiers    — gold             */
-    'rgba(245,166,35,0.22)',   /* market   — amber            */
-    'rgba(52,199,89,0.22)',    /* traction — green            */
-    'rgba(245,166,35,0.32)',   /* ask      — amber            */
-  ];
-
-  var phInner = document.getElementById('ph-inner');
-  var phImg   = document.getElementById('ph-img');
-  var phGlow  = document.getElementById('ph-glow');
-  var phBusy  = false;
-
-  function transitionPhone(newIdx) {
-    if (!phInner || !phImg) return;
-
-    /* ── Flip out ── */
-    phBusy = true;
-    anime({
-      targets: phInner,
-      rotateY: ['-18deg', '85deg'],
-      rotateX: ['5deg',   '-6deg'],
-      scale:   [1, 0.88],
-      opacity: [1, 0],
-      duration: 340,
-      easing: 'easeInCubic',
-      complete: function () {
-        /* swap content at the invisible peak */
-        phImg.src = PH_SCREENS[newIdx];
-        if (phGlow) {
-          var c = PH_GLOWS[newIdx];
-          phGlow.style.background =
-            'radial-gradient(ellipse, ' + c + ' 0%, transparent 70%)';
-        }
-        /* ── Flip in ── */
-        anime({
-          targets: phInner,
-          rotateY: ['-85deg', '-18deg'],
-          rotateX: ['6deg',    '5deg'],
-          scale:   [0.88, 1],
-          opacity: [0, 1],
-          duration: 480,
-          easing: 'easeOutCubic',
-          complete: function () { phBusy = false; },
-        });
-      },
-    });
-  }
-
   /* ── Transition ──────────────────────────────────────────────────── */
   function go(idx) {
     if (idx === current || locked || idx < 0 || idx >= total) return;
@@ -1103,9 +909,6 @@ body::after {
     var leaving  = slides[current];
     var entering = slides[idx];
     var dir = idx > current ? 1 : -1;
-
-    /* 3D phone flip */
-    transitionPhone(idx);
 
     /* Stop floating phones on leaving */
     Array.from(leaving.querySelectorAll('.pwrap')).forEach(function (p) { p.classList.remove('floating'); });
@@ -1152,6 +955,481 @@ body::after {
   slides.forEach(function (s, i) { if (i !== 0) s.style.display = 'none'; });
   animIn(slides[0]);
 
+})();
+</script>
+
+<!-- ═══════════════════ THREE.JS 3D SCENE ════════════════════════════ -->
+<script>
+(function () {
+  if (typeof THREE === 'undefined' || window.innerWidth < 1280) return;
+
+  var canvas = document.getElementById('canvas3d');
+  if (!canvas) return;
+
+  /* ── Renderer ─────────────────────────────────────────────────────── */
+  var renderer = new THREE.WebGLRenderer({ canvas: canvas, alpha: true, antialias: true, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.3;
+
+  /* ── Scene + Camera ─────────────────────────────────────────────── */
+  var scene  = new THREE.Scene();
+  scene.fog  = new THREE.Fog(0x060608, 14, 40);
+  var camera = new THREE.PerspectiveCamera(46, 1, 0.1, 100);
+  camera.position.set(0, 3, 11);
+  camera.lookAt(0, 0.4, 0);
+
+  function doResize() {
+    var w = canvas.offsetWidth, h = canvas.offsetHeight;
+    if (!w || !h) return;
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, h, false);
+  }
+  window.addEventListener('resize', doResize);
+  doResize();
+
+  /* ── Lights ──────────────────────────────────────────────────────── */
+  scene.add(new THREE.AmbientLight(0x101018, 1.0));
+
+  var sun = new THREE.DirectionalLight(0xFFEAC8, 2.6);
+  sun.position.set(5, 9, 7);
+  sun.castShadow = true;
+  sun.shadow.mapSize.width = sun.shadow.mapSize.height = 2048;
+  sun.shadow.camera.left = sun.shadow.camera.bottom = -12;
+  sun.shadow.camera.right = sun.shadow.camera.top = 12;
+  sun.shadow.camera.far = 50;
+  sun.shadow.bias = -0.001;
+  scene.add(sun);
+
+  var fill = new THREE.PointLight(0x8B5CF6, 2.2, 28);
+  fill.position.set(-7, -1, 5);
+  scene.add(fill);
+
+  var rim = new THREE.DirectionalLight(0xF5A623, 0.55);
+  rim.position.set(-5, 4, -6);
+  scene.add(rim);
+
+  var topFill = new THREE.PointLight(0xFFFFFF, 0.5, 22);
+  topFill.position.set(0, 12, 0);
+  scene.add(topFill);
+
+  /* screen glow point light — animates during PULSE/EMERGE */
+  var screenLight = new THREE.PointLight(0xF5A623, 0, 10);
+  screenLight.position.set(1.2, 0, 1.5);
+  scene.add(screenLight);
+
+  /* ── Ground ──────────────────────────────────────────────────────── */
+  var ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(40, 40),
+    new THREE.MeshStandardMaterial({ color: 0x040407, metalness: 0.85, roughness: 0.18, transparent: true, opacity: 0.7 })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -1.65;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  var grid = new THREE.GridHelper(40, 40, 0xF5A623, 0x141418);
+  grid.position.y = -1.62;
+  grid.material.transparent = true;
+  grid.material.opacity = 0.18;
+  scene.add(grid);
+
+  /* ══════════════════════════════════════════════════════════════════
+     PHONE BUILD
+  ══════════════════════════════════════════════════════════════════ */
+  var screenMesh;
+
+  function buildPhone() {
+    var g = new THREE.Group();
+    var M = THREE.MeshStandardMaterial;
+
+    var bodyMat   = new M({ color: 0x2C2C2E, metalness: 0.88, roughness: 0.14 });
+    var chromeMat = new M({ color: 0xA8A8B0, metalness: 0.96, roughness: 0.04 });
+    var darkMat   = new M({ color: 0x0C0C0E, metalness: 0.6,  roughness: 0.4  });
+    var screenMat = new M({ color: 0x030308, emissive: new THREE.Color(0x000000), emissiveIntensity: 0, roughness: 0.04, metalness: 0.0 });
+    var homeBarMat= new M({ color: 0xFFFFFF, transparent: true, opacity: 0.32, roughness: 0.5 });
+
+    /* Body */
+    var body = new THREE.Mesh(new THREE.BoxGeometry(1.64, 3.48, 0.30), bodyMat);
+    body.castShadow = true; body.receiveShadow = true; g.add(body);
+
+    /* Screen face */
+    screenMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.42, 3.06), screenMat);
+    screenMesh.position.z = 0.152; g.add(screenMesh);
+
+    /* Dynamic Island */
+    g.add(mkbox(0.46, 0.15, 0.02, darkMat, 0, 1.36, 0.155));
+
+    /* Home bar */
+    g.add(mkbox(0.52, 0.055, 0.01, homeBarMat, 0, -1.34, 0.155));
+
+    /* USB-C port */
+    g.add(mkbox(0.24, 0.072, 0.02, darkMat, 0, -1.76, 0));
+
+    /* Speaker holes */
+    var holeMat = new M({ color: 0x080808, metalness: 0.5, roughness: 0.6 });
+    [-0.32, 0.32].forEach(function(x) {
+      for (var i = 0; i < 5; i++) {
+        var h = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.012, 6), holeMat);
+        h.rotation.x = Math.PI / 2; h.position.set(x + i * 0.05 - 0.1, -1.76, 0.148); g.add(h);
+      }
+    });
+
+    /* Power button — right */
+    g.add(mkbox(0.065, 0.46, 0.16, chromeMat,  0.88, 0.06, 0));
+    /* Action button — left top */
+    g.add(mkbox(0.065, 0.19, 0.16, chromeMat, -0.88, 0.9,  0));
+    /* Volume + */
+    g.add(mkbox(0.065, 0.36, 0.16, chromeMat, -0.88, 0.28, 0));
+    /* Volume - */
+    g.add(mkbox(0.065, 0.36, 0.16, chromeMat, -0.88,-0.24, 0));
+
+    /* Camera housing (rear) */
+    var camHousing = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.82, 0.11),
+      new M({ color: 0x181818, metalness: 0.92, roughness: 0.08 }));
+    camHousing.position.set(-0.32, 1.22, -0.20); camHousing.castShadow = true; g.add(camHousing);
+
+    /* 3 lenses */
+    var lensRingM = new M({ color: 0x3C3C3E, metalness: 0.9, roughness: 0.1 });
+    var lensDarkM = new M({ color: 0x080808, metalness: 1.0, roughness: 0.0 });
+    [[0, 0.24],[-.19,-.15],[.19,-.15]].forEach(function(p) {
+      var ring = new THREE.Mesh(new THREE.CircleGeometry(0.155, 20), lensRingM);
+      ring.position.set(-0.32 + p[0], 1.22 + p[1], -0.254); g.add(ring);
+      var lens = new THREE.Mesh(new THREE.CircleGeometry(0.1, 20), lensDarkM);
+      lens.position.set(-0.32 + p[0], 1.22 + p[1], -0.258); g.add(lens);
+    });
+    /* Flash */
+    var flashM = new M({ color: 0xFFEEAA, emissive: new THREE.Color(0xFFDD88), emissiveIntensity: 0.4 });
+    var flash = new THREE.Mesh(new THREE.CircleGeometry(0.052, 8), flashM);
+    flash.position.set(-0.32 + 0.22, 1.22 + 0.24, -0.258); g.add(flash);
+
+    /* Thin chrome frame edge — top / bottom / sides */
+    var frameM = new M({ color: 0x8A8A92, metalness: 0.95, roughness: 0.05 });
+    [[1.64,0.04,0.30, 0, 1.74,0],[1.64,0.04,0.30, 0,-1.74,0],
+     [0.04,3.48,0.30, 0.84,0,0],[0.04,3.48,0.30,-0.84,0,0]].forEach(function(d) {
+      g.add(mkbox(d[0],d[1],d[2],frameM,d[3],d[4],d[5]));
+    });
+
+    return g;
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+     CAR BUILD
+  ══════════════════════════════════════════════════════════════════ */
+  function buildCar() {
+    var g = new THREE.Group();
+    var M = THREE.MeshStandardMaterial;
+
+    var orange  = new M({ color: 0xF5A623, metalness: 0.38, roughness: 0.38 });
+    var darkOrg = new M({ color: 0xD9901A, metalness: 0.45, roughness: 0.42 });
+    var carDark = new M({ color: 0x0B0B0D, metalness: 0.72, roughness: 0.28 });
+    var glass   = new M({ color: 0x7AAFC4, metalness: 0.0,  roughness: 0.02, transparent: true, opacity: 0.52 });
+    var chrome  = new M({ color: 0xC2C2CA, metalness: 0.96, roughness: 0.04 });
+    var rubber  = new M({ color: 0x101010, metalness: 0.05, roughness: 0.96 });
+    var rim     = new M({ color: 0x8A8A92, metalness: 0.92, roughness: 0.08 });
+    var rimOrg  = new M({ color: 0xF5A623, metalness: 0.72, roughness: 0.18 });
+    var emitW   = new M({ color: 0xFFFFFF, emissive: new THREE.Color(0xFFFFFF), emissiveIntensity: 3.5 });
+    var emitR   = new M({ color: 0xFF2020, emissive: new THREE.Color(0xFF0808), emissiveIntensity: 3.2 });
+    var emitO   = new M({ color: 0xFFAA00, emissive: new THREE.Color(0xFFAA00), emissiveIntensity: 1.8 });
+
+    /* ── Lower body ── */
+    var lb = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.86, 2.08), orange);
+    lb.position.y = 0.53; lb.castShadow = true; lb.receiveShadow = true; g.add(lb);
+
+    /* Side skirts */
+    [1.06, -1.06].forEach(function(z) {
+      var sk = new THREE.Mesh(new THREE.BoxGeometry(3.9, 0.13, 0.07), darkOrg);
+      sk.position.set(0, 0.18, z); g.add(sk);
+    });
+
+    /* ── Cabin ── */
+    var cab = new THREE.Mesh(new THREE.BoxGeometry(2.68, 0.76, 1.9), orange);
+    cab.position.set(-0.14, 1.27, 0); cab.castShadow = true; g.add(cab);
+
+    /* Roof slight inset */
+    g.add(mkbox(2.44, 0.06, 1.65, darkOrg, -0.14, 1.68, 0));
+
+    /* Roof antenna */
+    g.add(mkbox(0.04, 0.26, 0.04, carDark, 0.3, 1.78, 0));
+
+    /* ── Windows ── */
+    /* Front windshield */
+    var fw = new THREE.Mesh(new THREE.PlaneGeometry(1.72, 0.70), glass);
+    fw.rotation.y = -Math.PI * 0.275; fw.position.set(1.16, 1.34, 0); g.add(fw);
+    /* Rear windshield */
+    var rw = new THREE.Mesh(new THREE.PlaneGeometry(1.48, 0.66), glass);
+    rw.rotation.y =  Math.PI * 0.275; rw.position.set(-1.28, 1.34, 0); g.add(rw);
+    /* Side windows */
+    [[0.22,1.35,0.965,Math.PI/2],[0.22,1.35,-0.965,-Math.PI/2],
+     [-0.66,1.35,0.965,Math.PI/2],[-0.66,1.35,-0.965,-Math.PI/2]].forEach(function(d,i) {
+      var sw = new THREE.Mesh(new THREE.PlaneGeometry(i<2?1.04:0.82, 0.52), glass);
+      sw.position.set(d[0],d[1],d[2]); sw.rotation.y = d[3]; g.add(sw);
+    });
+    /* B-pillar */
+    [0.967, -0.967].forEach(function(z) {
+      g.add(mkbox(0.085, 0.72, 0.02, carDark, -0.14, 1.3, z));
+    });
+    /* Window sill line */
+    [0.970, -0.970].forEach(function(z) {
+      g.add(mkbox(2.76, 0.04, 0.02, carDark, -0.14, 0.93, z));
+    });
+
+    /* ── Hood ── */
+    g.add(mkbox(1.28, 0.085, 1.98, orange,  1.48, 0.98, 0));
+    /* Hood creases */
+    [0.52, -0.52].forEach(function(z) {
+      g.add(mkbox(1.18, 0.022, 0.04, darkOrg, 1.48, 1.02, z));
+    });
+
+    /* ── Front fascia ── */
+    g.add(mkbox(0.14, 0.60, 1.98, carDark, 2.26, 0.46, 0));
+    /* Grille surround (orange accent line) */
+    g.add(mkbox(0.08, 0.14, 1.38, orange,  2.27, 0.64, 0));
+    /* Grille bars */
+    for (var i = 0; i < 6; i++) {
+      g.add(mkbox(0.07, 0.02, 1.35, chrome, 2.27, 0.38 + i*0.075, 0));
+    }
+    /* Lower air intake */
+    g.add(mkbox(0.10, 0.20, 1.72, new M({ color: 0x080808, metalness: 0.8 }), 2.26, 0.21, 0));
+    /* Front chrome strip */
+    g.add(mkbox(0.07, 0.045, 1.94, chrome, 2.26, 0.77, 0));
+    /* Front splitter */
+    g.add(mkbox(0.38, 0.06, 1.95, carDark, 2.06, 0.08, 0));
+
+    /* ── Headlights (both sides) ── */
+    [0.70, -0.70].forEach(function(z) {
+      g.add(mkbox(0.07, 0.24, 0.44, new M({ color: 0x1A1A1A, metalness: 0.8 }), 2.26, 0.80, z));
+      /* DRL strip */
+      g.add(mkbox(0.045, 0.042, 0.38, emitW, 2.27, 0.80, z));
+      /* Main beam */
+      g.add(mkbox(0.045, 0.15, 0.20, new M({ color: 0xFFFFFF, emissive: new THREE.Color(0xFFFFFF), emissiveIntensity: 1.8 }), 2.27, 0.82, z));
+      /* Amber turn signal */
+      g.add(mkbox(0.04, 0.045, 0.10, emitO, 2.27, 0.62, z));
+    });
+
+    /* ── Rear fascia ── */
+    g.add(mkbox(0.14, 0.54, 1.98, carDark, -2.26, 0.46, 0));
+    g.add(mkbox(0.07, 0.045, 1.90, chrome, -2.26, 0.77, 0));
+    /* Rear diffuser */
+    g.add(mkbox(0.28, 0.18, 1.90, carDark, -2.12, 0.14, 0));
+    for (var j = 0; j < 4; j++) {
+      g.add(mkbox(0.22, 0.14, 0.04, new M({ color: 0x1A1A1A }), -2.10, 0.14, -0.55 + j*0.37));
+    }
+
+    /* ── Tail lights ── */
+    [0.72, -0.72].forEach(function(z) {
+      g.add(mkbox(0.07, 0.30, 0.52, new M({ color: 0x1A0000, metalness: 0.7 }), -2.26, 0.76, z));
+      g.add(mkbox(0.045, 0.065, 0.44, emitR, -2.27, 0.79, z));
+      g.add(mkbox(0.045, 0.085, 0.20, emitW, -2.27, 0.64, z));
+    });
+    /* Full-width connecting tail light strip */
+    g.add(mkbox(0.045, 0.045, 1.36, emitR, -2.27, 0.79, 0));
+
+    /* ── Exhaust pipes ── */
+    [-0.52, 0.52].forEach(function(z) {
+      var exGeo = new THREE.CylinderGeometry(0.058, 0.048, 0.16, 12);
+      exGeo.rotateZ(Math.PI / 2);
+      var ex = new THREE.Mesh(exGeo, chrome);
+      ex.position.set(-2.27, 0.22, z); g.add(ex);
+    });
+
+    /* ── Door details ── */
+    [1.05, -1.05].forEach(function(z) {
+      /* Handle recess */
+      g.add(mkbox(0.36, 0.10, 0.04, new M({ color: 0x080808 }), 0.05, 0.92, z * 1.008));
+      /* Handle */
+      g.add(mkbox(0.28, 0.055, 0.05, chrome, 0.05, 0.92, z));
+    });
+    /* Body line crease */
+    [-0.60, 0.60].forEach(function(y) {
+      [1.053, -1.053].forEach(function(z) {
+        g.add(mkbox(3.9, 0.03, 0.02, darkOrg, 0, y, z));
+      });
+    });
+
+    /* ── Side mirrors ── */
+    [1.06, -1.06].forEach(function(z) {
+      g.add(mkbox(0.24, 0.15, 0.065, carDark, 0.88, 1.16, z * 1.06));
+      var mg = new THREE.Mesh(new THREE.PlaneGeometry(0.17, 0.11),
+        new M({ color: 0x4488AA, metalness: 0.1, roughness: 0.0, transparent: true, opacity: 0.72 }));
+      mg.rotation.y = z > 0 ? Math.PI / 2 : -Math.PI / 2;
+      mg.position.set(0.88, 1.16, z * 1.095); g.add(mg);
+    });
+
+    /* ── Spoiler ── */
+    g.add(mkbox(0.065, 0.15, 1.78, carDark, -2.1, 1.72, 0));
+    g.add(mkbox(0.32, 0.048, 1.78, carDark, -2.1, 1.80, 0));
+    [-0.89, 0.89].forEach(function(z) {
+      g.add(mkbox(0.32, 0.16, 0.065, carDark, -2.1, 1.72, z));
+    });
+
+    /* ── Wasel orange stripe (side glow) ── */
+    [1.054, -1.054].forEach(function(z) {
+      g.add(mkbox(1.3, 0.065, 0.022, emitO, -0.08, 0.68, z));
+    });
+
+    /* ── Wheels ── */
+    g.userData.wheels = [];
+    [[1.4, 0.33, 1.14],[1.4, 0.33,-1.14],[-1.4, 0.33, 1.14],[-1.4, 0.33,-1.14]].forEach(function(wp) {
+      var wg = new THREE.Group();
+      wg.position.set(wp[0], wp[1], wp[2]);
+
+      /* Tire */
+      var tGeo = new THREE.CylinderGeometry(0.33, 0.33, 0.24, 32);
+      tGeo.rotateX(Math.PI / 2);
+      var tire = new THREE.Mesh(tGeo, rubber); tire.castShadow = true; wg.add(tire);
+
+      /* Rim outer ring */
+      var roGeo = new THREE.CylinderGeometry(0.255, 0.255, 0.245, 32);
+      roGeo.rotateX(Math.PI / 2);
+      wg.add(new THREE.Mesh(roGeo, rim));
+
+      /* 5 spokes */
+      for (var s = 0; s < 5; s++) {
+        var sp = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.25, 0.20), rim);
+        sp.rotation.z = (s / 5) * Math.PI * 2; wg.add(sp);
+      }
+
+      /* Centre cap (orange Wasel) */
+      var ccGeo = new THREE.CylinderGeometry(0.075, 0.075, 0.26, 16);
+      ccGeo.rotateX(Math.PI / 2);
+      wg.add(new THREE.Mesh(ccGeo, rimOrg));
+
+      /* Brake disc */
+      var bdGeo = new THREE.CylinderGeometry(0.21, 0.21, 0.045, 28);
+      bdGeo.rotateX(Math.PI / 2);
+      wg.add(new THREE.Mesh(bdGeo, new M({ color: 0x3A3A3A, metalness: 0.82, roughness: 0.38 })));
+
+      /* Caliper */
+      var cal = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.24, 0.15), rimOrg);
+      cal.position.set(0, 0.19, 0); wg.add(cal);
+
+      g.add(wg); g.userData.wheels.push(wg);
+    });
+
+    /* ── Wheel arches ── */
+    [[1.4,1.14],[1.4,-1.14],[-1.4,1.14],[-1.4,-1.14]].forEach(function(p) {
+      var ag = new THREE.CylinderGeometry(0.42, 0.42, 0.04, 28, 1, false, 0, Math.PI);
+      var arch = new THREE.Mesh(ag, orange);
+      arch.rotation.x = Math.PI; arch.position.set(p[0], 0.72, p[1]); g.add(arch);
+    });
+
+    g.position.y = 0.05;
+    return g;
+  }
+
+  /* ── Helper: make a box mesh at position ── */
+  function mkbox(w, h, d, mat, x, y, z) {
+    var m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z); m.castShadow = true; return m;
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+     BUILD + ANIMATE
+  ══════════════════════════════════════════════════════════════════ */
+  var phoneGroup = buildPhone();
+  phoneGroup.position.set(4, -8, 0);
+  phoneGroup.scale.setScalar(0.01);
+  scene.add(phoneGroup);
+
+  var carGroup = buildCar();
+  carGroup.position.set(0, -1.1, -1);
+  carGroup.rotation.y = -Math.PI / 2;
+  carGroup.scale.setScalar(0.01);
+  scene.add(carGroup);
+
+  var clock = new THREE.Clock();
+  var phase = 'INTRO', phaseT = 0;
+
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function easeOut(t)    { return 1 - Math.pow(1 - t, 3); }
+  function easeInOut(t)  { return t < 0.5 ? 4*t*t*t : 1-Math.pow(-2*t+2,3)/2; }
+
+  function tick() {
+    requestAnimationFrame(tick);
+    var dt = Math.min(clock.getDelta(), 0.05);
+    var elapsed = clock.getElapsedTime();
+    phaseT += dt;
+
+    /* ── INTRO: phone sweeps in ── */
+    if (phase === 'INTRO') {
+      var t = Math.min(phaseT / 1.8, 1), e = easeOut(t);
+      phoneGroup.position.set(lerp(5, 1.0, e), lerp(-7, 0.05, e), 0);
+      phoneGroup.scale.setScalar(lerp(0.01, 1.0, e));
+      phoneGroup.rotation.y = lerp(Math.PI * 0.6, -0.26, e);
+      phoneGroup.rotation.x = lerp(-0.4, 0.07, e);
+      camera.position.set(lerp(0, 1.5, e), lerp(4, 3, e), lerp(13, 10, e));
+      camera.lookAt(lerp(0, 0.5, e), lerp(0, 0.35, e), 0);
+      if (t >= 1) { phase = 'PULSE'; phaseT = 0; }
+    }
+
+    /* ── PULSE: screen glows, phone vibrates lightly ── */
+    else if (phase === 'PULSE') {
+      var t = Math.min(phaseT / 1.0, 1);
+      if (screenMesh) {
+        screenMesh.material.emissive.setHex(0xF5A623);
+        screenMesh.material.emissiveIntensity = easeInOut(t) * 3.0;
+      }
+      screenLight.intensity = easeInOut(t) * 2.2;
+      var pulse = 1.0 + Math.sin(phaseT * Math.PI * 2.4) * 0.018 * (1 - t);
+      phoneGroup.scale.setScalar(pulse);
+      if (t >= 1) { phase = 'EMERGE'; phaseT = 0; }
+    }
+
+    /* ── EMERGE: car blasts through the screen ── */
+    else if (phase === 'EMERGE') {
+      var t = Math.min(phaseT / 2.4, 1), e = easeOut(t);
+      /* car scale: fast pop at start */
+      carGroup.scale.setScalar(lerp(0.04, 1.0, easeOut(Math.min(t * 1.6, 1))));
+      /* position: bursts forward from phone center */
+      carGroup.position.set(
+        lerp(phoneGroup.position.x - 0.4, -0.8, e),
+        lerp(-0.4, -1.1, easeOut(Math.min(t * 1.5, 1))),
+        lerp(-0.8, 3.2, e)
+      );
+      carGroup.rotation.y = lerp(0.5, -Math.PI / 2, easeOut(Math.min(t * 1.3, 1)));
+      /* screen dims as car leaves */
+      if (screenMesh) screenMesh.material.emissiveIntensity = 3.0 * (1 - easeInOut(Math.min(t * 1.8, 1)));
+      screenLight.intensity = 2.2 * (1 - easeInOut(Math.min(t * 2, 1)));
+      /* camera pulls back + shifts to show both */
+      camera.position.set(lerp(1.5, 2.8, e), lerp(3, 3.2, e), lerp(10, 9, e));
+      camera.lookAt(lerp(0.5, -0.3, e), lerp(0.35, 0.3, e), 0);
+      if (t >= 1) { phase = 'SETTLE'; phaseT = 0; }
+    }
+
+    /* ── SETTLE: car bounces to rest ── */
+    else if (phase === 'SETTLE') {
+      var t = Math.min(phaseT / 0.9, 1);
+      carGroup.position.y = -1.1 + Math.sin(phaseT * Math.PI * 2.8) * (1 - t) * 0.12;
+      if (t >= 1) { phase = 'IDLE'; phaseT = 0; }
+    }
+
+    /* ── IDLE: everything breathes + wheels spin ── */
+    else if (phase === 'IDLE') {
+      phoneGroup.position.y  = 0.05 + Math.sin(elapsed * 0.72) * 0.20;
+      phoneGroup.rotation.y  = -0.26 + Math.sin(elapsed * 0.44) * 0.07;
+      phoneGroup.rotation.x  =  0.07 + Math.sin(elapsed * 0.58) * 0.03;
+
+      carGroup.position.y    = -1.1 + Math.sin(elapsed * 0.82 + 1.3) * 0.11;
+      carGroup.rotation.y    = -Math.PI / 2 + Math.sin(elapsed * 0.32) * 0.05;
+
+      /* wheel spin */
+      (carGroup.userData.wheels || []).forEach(function(w) { w.rotation.z -= dt * 2.0; });
+
+      /* slow camera orbit */
+      camera.position.x = 2.8 + Math.sin(elapsed * 0.11) * 0.5;
+      camera.position.y = 3.2 + Math.sin(elapsed * 0.17) * 0.22;
+      camera.position.z = 9.0 + Math.sin(elapsed * 0.08) * 0.6;
+      camera.lookAt(-0.3, 0.3, 0);
+    }
+
+    renderer.render(scene, camera);
+  }
+
+  tick();
 })();
 </script>
 </body>
