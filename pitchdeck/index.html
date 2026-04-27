@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <title>واصل — Investor Deck 2025</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
 <style>
@@ -312,6 +314,114 @@ body::after {
 
 /* ── g3c ─────────────────────────────────────────────────────────── */
 .g3c { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+/* ════════════════════════════════════════════════════════════════════
+   MOBILE — iPhone and small screens
+════════════════════════════════════════════════════════════════════ */
+@media (max-width: 680px) {
+
+  /* Slide padding */
+  .slide { padding: 28px 24px 24px; justify-content: flex-start; padding-top: 52px; }
+  .inner { max-width: 100%; }
+  .slide.center { align-items: flex-start; text-align: left; }
+  .slide.center .inner { text-align: left; }
+
+  /* Hide ghost numbers on mobile */
+  .ghost-num { display: none; }
+
+  /* Typography */
+  .label { margin-bottom: 16px; font-size: 8px; letter-spacing: 3px; }
+  .h1 { font-size: clamp(52px, 16vw, 72px); letter-spacing: -2px; }
+  .h2 { font-size: clamp(28px, 9vw, 42px); letter-spacing: -1.5px; margin-bottom: 12px !important; }
+  .sub { font-size: 13px; line-height: 1.7; }
+
+  /* واصل hero sub */
+  #h1-sub { font-size: 16px !important; margin-bottom: 28px !important; }
+
+  /* Pain rows */
+  .pain { gap: 16px; padding: 16px 0; }
+  .pain-title { font-size: 15px; }
+  .pain-body { font-size: 12px; }
+
+  /* Two-col → single col */
+  .two-col { grid-template-columns: 1fr; gap: 24px; }
+  #sol-r { border-left: none !important; padding-left: 0 !important; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 24px; }
+  #trk-r { border-left: none !important; padding-left: 0 !important; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 20px; }
+
+  /* BMP rows — hide description on mobile, keep weight + name + bar */
+  .bmp { gap: 12px; padding: 13px 0; }
+  .bmp-d { display: none; }
+  .bmp-n { width: auto; flex: 1; font-size: 12px; }
+  .bmp-w { font-size: 12px; width: 32px; }
+  .btrack { width: 70px; }
+
+  /* Phones slide — horizontal scroll, smaller frames */
+  .phones {
+    justify-content: flex-start;
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 16px;
+    gap: 14px;
+    /* hide scrollbar */
+    scrollbar-width: none;
+  }
+  .phones::-webkit-scrollbar { display: none; }
+  .pframe { width: 130px; height: 280px; border-radius: 28px; }
+  .pframe::before { width: 52px; height: 16px; border-radius: 8px; }
+  .pscreen { border-radius: 27px; }
+  .pwrap { gap: 8px; }
+  .pwrap.floating { animation: none; } /* no float on mobile — jitters */
+  .pcap { font-size: 8px; }
+  /* Reset offset margin-tops on mobile */
+  #ph1, #ph3 { margin-top: 0 !important; }
+
+  /* Tier cards → single col */
+  .g3c { grid-template-columns: 1fr; gap: 10px; }
+  .tc { padding: 18px; }
+  .tc-price { font-size: 32px; }
+  .tc-mo { margin-bottom: 14px; }
+
+  /* Stat grid → 2×2 */
+  .stat-grid { grid-template-columns: 1fr 1fr; }
+  .scard { padding: 20px 12px; }
+  .snum { font-size: clamp(26px, 7vw, 36px); }
+  .slbl { font-size: 8px; letter-spacing: 1px; }
+
+  /* Traction rows */
+  .trk { padding: 11px 0; }
+  .trk-l { font-size: 12px; }
+  .trk-r { font-size: 9px; padding: 3px 10px; }
+
+  /* Ask slide */
+  .ask-n { font-size: clamp(60px, 17vw, 80px) !important; letter-spacing: -3px; }
+  .alloc-bar { margin: 20px 0; }
+  #alloc { max-width: 100% !important; }
+
+  /* Nav dots — move slightly inward */
+  #nav { right: 14px; }
+
+  /* Scroll cue */
+  .cue { font-size: 8px; }
+
+  /* Slide number */
+  .snum { font-size: 9px; }
+
+  /* Citations — smaller */
+  .cites { font-size: 7px; line-height: 1.5; }
+
+  /* Bottom safe area for iPhone home bar */
+  .slide { padding-bottom: max(24px, env(safe-area-inset-bottom)); }
+}
+
+/* Landscape mobile */
+@media (max-width: 680px) and (orientation: landscape) {
+  .slide { padding-top: 20px; padding-bottom: 16px; justify-content: center; }
+  .h1 { font-size: 42px; }
+  .h2 { font-size: 28px; }
+  .label { margin-bottom: 8px; }
+  .pain { padding: 10px 0; }
+}
 </style>
 </head>
 <body>
