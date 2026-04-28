@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>واصل — Jordan's First Subscription Rideshare</title>
+<meta name="description" content="واصل is Jordan's first subscription-based rideshare. Drivers keep 100% of every fare. Riders get reliable, fairly-priced trips." />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:     #060608;
+  --orange: #F5A623;
+  --white:  #FFFFFF;
+  --g1:     #C8C8C8;
+  --g2:     #666666;
+  --g3:     #1A1A1A;
+  --g4:     #111111;
+  --mono:   'SF Mono', 'Monaco', monospace;
+}
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--white);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  overflow-x: hidden;
+}
+
+/* ── Ambient glow ── */
+#ambience { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+#ambience span { position: absolute; border-radius: 50%; filter: blur(110px); will-change: transform, opacity; }
+#ambience .ab1 { width: 700px; height: 700px; background: radial-gradient(circle, rgba(245,166,35,0.13) 0%, transparent 70%); top: -10%; left: -8%; animation: amb1 18s ease-in-out infinite; }
+#ambience .ab2 { width: 600px; height: 600px; background: radial-gradient(circle, rgba(139,92,246,0.10) 0%, transparent 70%); bottom: -15%; right: -5%; animation: amb2 22s ease-in-out infinite; }
+#ambience .ab3 { width: 500px; height: 500px; background: radial-gradient(circle, rgba(52,199,89,0.07) 0%, transparent 70%); top: 40%; left: 35%; animation: amb3 26s ease-in-out infinite; }
+@keyframes amb1 { 0%,100%{transform:translate(0,0) scale(1);} 33%{transform:translate(60px,-40px) scale(1.1);} 66%{transform:translate(-30px,50px) scale(0.95);} }
+@keyframes amb2 { 0%,100%{transform:translate(0,0) scale(1);} 33%{transform:translate(-50px,30px) scale(1.08);} 66%{transform:translate(40px,-60px) scale(0.92);} }
+@keyframes amb3 { 0%,100%{transform:translate(0,0) scale(1);} 50%{transform:translate(-40px,-40px) scale(1.15);} }
+
+/* ── Nav ── */
+nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 48px;
+  background: rgba(6,6,8,0.85);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.nav-logo { font-size: 26px; font-weight: 900; color: var(--orange); letter-spacing: -1px; }
+.nav-cta {
+  background: var(--orange); color: #000; font-weight: 700;
+  padding: 10px 26px; border-radius: 50px; font-size: 14px;
+  text-decoration: none; transition: transform 0.2s, opacity 0.2s;
+  letter-spacing: 0.3px;
+}
+.nav-cta:hover { transform: scale(1.04); opacity: 0.9; }
+
+/* ── Hero ── */
+.hero {
+  height: 100vh; min-height: 600px;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center; padding: 0 24px;
+  position: relative; z-index: 1;
+}
+.hero-label {
+  font-size: 11px; letter-spacing: 5px; color: var(--orange);
+  text-transform: uppercase; margin-bottom: 20px;
+  font-family: var(--mono); opacity: 0;
+}
+.hero-title {
+  font-size: clamp(72px, 14vw, 160px);
+  font-weight: 900; color: var(--orange);
+  line-height: 0.88; margin-bottom: 22px;
+  letter-spacing: -4px; opacity: 0;
+}
+.hero-sub {
+  font-size: clamp(17px, 2.2vw, 24px);
+  color: var(--g1); max-width: 520px;
+  line-height: 1.5; margin-bottom: 10px; opacity: 0;
+}
+.hero-sub strong { color: var(--white); }
+.hero-tags {
+  display: flex; gap: 10px; justify-content: center;
+  flex-wrap: wrap; margin-top: 28px; opacity: 0;
+}
+.tag {
+  border: 1px solid rgba(245,166,35,0.3); color: var(--orange);
+  font-size: 12px; padding: 6px 16px;
+  border-radius: 50px; font-weight: 600; letter-spacing: 0.5px;
+}
+.scroll-hint {
+  position: absolute; bottom: 36px; left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  color: var(--g2); font-size: 10px; letter-spacing: 3px; opacity: 0;
+}
+.scroll-line { width: 1px; height: 44px; background: linear-gradient(to bottom, var(--orange), transparent); animation: scrollPulse 2s ease-in-out infinite; }
+@keyframes scrollPulse { 0%,100%{opacity:0.3;} 50%{opacity:1;} }
+
+/* ── Scroll wrapper ── */
+.scroll-wrapper {
+  display: flex; align-items: flex-start;
+  max-width: 1300px; margin: 0 auto;
+  padding: 0 48px;
+  position: relative; z-index: 1;
+}
+.sections-list { flex: 1; }
+
+/* ── Individual sections ── */
+.section {
+  height: 100vh; min-height: 500px;
+  display: flex; align-items: center;
+  padding-right: 80px;
+}
+.section-content { max-width: 460px; }
+.section-num {
+  font-size: 10px; letter-spacing: 4px; color: var(--orange);
+  font-family: var(--mono); margin-bottom: 18px; display: block;
+  text-transform: uppercase;
+}
+.section-title {
+  font-size: clamp(34px, 3.8vw, 58px);
+  font-weight: 800; line-height: 1.05;
+  margin-bottom: 18px; letter-spacing: -2px;
+}
+.section-desc {
+  font-size: 17px; color: var(--g1); line-height: 1.65;
+  margin-bottom: 20px;
+}
+.stat-row { display: flex; gap: 28px; margin-top: 28px; flex-wrap: wrap; }
+.stat { display: flex; flex-direction: column; gap: 4px; }
+.stat-val { font-size: 38px; font-weight: 800; color: var(--orange); letter-spacing: -2px; line-height: 1; }
+.stat-label { font-size: 11px; color: var(--g2); letter-spacing: 1px; }
+
+.tier-pills { display: flex; gap: 10px; margin-top: 24px; }
+.tier-pill-s { background: #2A2A2A; color: #AAA; padding: 8px 18px; border-radius: 20px; font-size: 13px; font-weight: 700; }
+.tier-pill-g { background: var(--orange); color: #000; padding: 8px 18px; border-radius: 20px; font-size: 13px; font-weight: 700; }
+.tier-pill-p { background: #8B5CF6; color: #FFF; padding: 8px 18px; border-radius: 20px; font-size: 13px; font-weight: 700; }
+
+.feature-list { list-style: none; margin-top: 20px; display: flex; flex-direction: column; gap: 13px; }
+.feature-list li { display: flex; align-items: center; gap: 12px; font-size: 16px; color: var(--g1); }
+.feature-list li::before { content: '✓'; color: var(--orange); font-weight: 800; font-size: 13px; flex-shrink: 0; background: rgba(245,166,35,0.12); width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+
+/* ── Sticky phone column ── */
+.sticky-phone-wrapper { width: 360px; flex-shrink: 0; }
+.sticky-phone-inner {
+  position: sticky;
+  top: calc(50vh - 330px);
+  padding: 20px 0;
+}
+
+/* ── Phone mockup ── */
+.phone {
+  width: 280px; height: 590px;
+  background: #0C0C0E;
+  border-radius: 46px;
+  border: 2px solid rgba(255,255,255,0.1);
+  position: relative; overflow: hidden;
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.05),
+    0 50px 100px rgba(0,0,0,0.7),
+    inset 0 1px 0 rgba(255,255,255,0.08);
+  margin: 0 auto;
+}
+.phone-island {
+  position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+  width: 88px; height: 26px; background: #000;
+  border-radius: 20px; z-index: 10;
+}
+.phone-screen { position: absolute; inset: 0; overflow: hidden; }
+.app-screen {
+  position: absolute; inset: 0;
+  opacity: 0; transition: opacity 0.6s cubic-bezier(0.4,0,0.2,1);
+}
+.app-screen.active { opacity: 1; }
+
+/* ── Screen 0: Rider booking ── */
+.screen-rider { background: #08080F; display: flex; flex-direction: column; }
+.map-bg {
+  flex: 1; position: relative; overflow: hidden;
+  background: #0A0A14;
+  background-image:
+    linear-gradient(rgba(245,166,35,0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(245,166,35,0.05) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+.map-road-h {
+  position: absolute; top: 42%; left: 0; right: 0; height: 2px;
+  background: rgba(245,166,35,0.15);
+}
+.map-road-v {
+  position: absolute; left: 48%; top: 0; bottom: 0; width: 2px;
+  background: rgba(245,166,35,0.10);
+}
+.map-road-diag {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(38deg, transparent 45%, rgba(245,166,35,0.08) 45%, rgba(245,166,35,0.08) 47%, transparent 47%);
+}
+.map-glow {
+  position: absolute; top: 30%; left: 40%;
+  width: 120px; height: 120px;
+  background: radial-gradient(circle, rgba(245,166,35,0.2) 0%, transparent 70%);
+  transform: translate(-50%,-50%);
+}
+.map-pin {
+  position: absolute; top: 36%; left: 50%; transform: translate(-50%, -50%);
+}
+.map-pin::before {
+  content: '';
+  display: block; width: 16px; height: 16px;
+  background: var(--orange); border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  box-shadow: 0 0 16px rgba(245,166,35,0.6);
+}
+.map-pin::after {
+  content: '';
+  display: block; width: 6px; height: 6px;
+  background: rgba(245,166,35,0.3); border-radius: 50%;
+  margin: 4px auto 0; animation: pingAnim 2s ease-in-out infinite;
+}
+@keyframes pingAnim { 0%{transform:scale(1);opacity:0.8;} 100%{transform:scale(3);opacity:0;} }
+.car-dots {
+  position: absolute; bottom: 35%; left: 20%;
+  display: flex; flex-direction: column; gap: 18px;
+}
+.car-dot {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 14px;
+}
+.car-dot-ring {
+  width: 28px; height: 28px; background: rgba(245,166,35,0.15);
+  border: 1px solid var(--orange); border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px;
+}
+.rider-bottom {
+  background: #0F0F14; padding: 14px 14px 18px;
+  border-top: 1px solid rgba(255,255,255,0.07);
+}
+.where-bar {
+  background: #1A1A22; border-radius: 12px;
+  padding: 11px 14px; margin-bottom: 10px;
+  display: flex; align-items: center; gap: 10px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.where-dot { width: 8px; height: 8px; background: var(--orange); border-radius: 50%; flex-shrink: 0; }
+.where-text { font-size: 13px; color: var(--g2); }
+.ride-btn {
+  background: var(--orange); color: #000;
+  width: 100%; padding: 13px; border-radius: 12px;
+  font-size: 14px; font-weight: 700; text-align: center;
+  letter-spacing: 0.3px;
+}
+
+/* ── Screen 1: Confirmed ── */
+.screen-confirmed {
+  background: #08080F;
+  padding: 60px 18px 18px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.confirmed-header { text-align: center; margin-bottom: 4px; }
+.confirmed-icon {
+  width: 52px; height: 52px;
+  background: rgba(245,166,35,0.12);
+  border: 1px solid rgba(245,166,35,0.2);
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 10px; font-size: 22px;
+}
+.confirmed-title { font-size: 17px; font-weight: 700; margin-bottom: 3px; }
+.confirmed-eta { font-size: 12px; color: var(--g2); }
+.driver-card {
+  background: #141420; border-radius: 14px; padding: 14px;
+  display: flex; align-items: center; gap: 12px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.driver-avatar {
+  width: 44px; height: 44px; background: var(--orange);
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 800; color: #000; flex-shrink: 0;
+}
+.driver-name { font-size: 14px; font-weight: 600; margin-bottom: 3px; }
+.driver-rating { font-size: 11px; color: var(--g2); }
+.driver-car { font-size: 11px; color: var(--g2); margin-top: 2px; }
+.trip-meta {
+  background: #141420; border-radius: 14px; padding: 14px 16px;
+  display: flex; justify-content: space-between;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.trip-meta-item { text-align: center; }
+.trip-meta-val { font-size: 18px; font-weight: 700; color: var(--orange); }
+.trip-meta-label { font-size: 10px; color: var(--g2); margin-top: 2px; letter-spacing: 0.5px; }
+
+/* ── Screen 2: Driver dashboard ── */
+.screen-driver {
+  background: #08080F;
+  padding: 60px 18px 18px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.online-toggle-row {
+  display: flex; align-items: center; justify-content: space-between;
+  background: #141420; border-radius: 14px; padding: 14px 16px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.online-status { font-size: 13px; font-weight: 600; }
+.online-status span { font-size: 11px; color: #4CD964; display: block; margin-top: 2px; }
+.toggle { width: 48px; height: 26px; background: #4CD964; border-radius: 13px; position: relative; flex-shrink: 0; }
+.toggle::after { content: ''; position: absolute; top: 3px; right: 3px; width: 20px; height: 20px; background: #fff; border-radius: 50%; }
+.earnings-card {
+  background: linear-gradient(135deg, rgba(245,166,35,0.18), rgba(245,166,35,0.04));
+  border: 1px solid rgba(245,166,35,0.2);
+  border-radius: 14px; padding: 16px; text-align: center;
+}
+.earnings-label { font-size: 10px; color: var(--g2); letter-spacing: 2px; margin-bottom: 6px; text-transform: uppercase; }
+.earnings-val { font-size: 34px; font-weight: 800; color: var(--orange); letter-spacing: -2px; line-height: 1; }
+.earnings-sub { font-size: 11px; color: var(--g2); margin-top: 6px; }
+.trips-row { display: flex; gap: 8px; }
+.trip-stat {
+  flex: 1; background: #141420; border-radius: 12px; padding: 12px;
+  text-align: center; border: 1px solid rgba(255,255,255,0.06);
+}
+.trip-stat-val { font-size: 20px; font-weight: 700; color: var(--white); }
+.trip-stat-label { font-size: 10px; color: var(--g2); margin-top: 2px; letter-spacing: 0.5px; }
+
+/* ── Screen 3: Subscriptions ── */
+.screen-subs {
+  background: #08080F;
+  padding: 60px 16px 16px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.subs-header { text-align: center; margin-bottom: 4px; }
+.subs-title { font-size: 15px; font-weight: 700; margin-bottom: 3px; }
+.subs-subtitle { font-size: 11px; color: var(--g2); }
+.sub-card {
+  border-radius: 14px; padding: 14px 16px;
+  border: 1px solid rgba(255,255,255,0.07);
+  background: #141420;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.sub-card.gold-card {
+  background: linear-gradient(135deg, rgba(245,166,35,0.18), rgba(245,166,35,0.04));
+  border-color: rgba(245,166,35,0.3);
+}
+.sub-card.plat-card {
+  background: linear-gradient(135deg, rgba(139,92,246,0.18), rgba(139,92,246,0.04));
+  border-color: rgba(139,92,246,0.3);
+}
+.sub-name { font-size: 14px; font-weight: 700; margin-bottom: 2px; }
+.sub-price { font-size: 11px; color: var(--g2); }
+.sub-badge { font-size: 10px; font-weight: 700; padding: 4px 10px; border-radius: 20px; letter-spacing: 0.5px; }
+.badge-silver { background: #2A2A2A; color: #AAA; }
+.badge-gold { background: var(--orange); color: #000; }
+.badge-plat { background: #8B5CF6; color: #fff; }
+.sub-note { font-size: 10px; color: var(--g2); text-align: center; padding-top: 4px; }
+
+/* ── Screen 4: Live tracking ── */
+.screen-live { background: #08080F; display: flex; flex-direction: column; }
+.live-map {
+  flex: 1; position: relative; overflow: hidden;
+  background: #0A0A14;
+  background-image:
+    linear-gradient(rgba(245,166,35,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(245,166,35,0.04) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+.route-path {
+  position: absolute; top: 55%; left: 22%; right: 28%;
+  height: 2px; background: linear-gradient(to right, var(--orange), rgba(245,166,35,0.3));
+  border-radius: 2px;
+}
+.route-path::before {
+  content: '';
+  position: absolute; left: -4px; top: -4px;
+  width: 10px; height: 10px; background: var(--orange); border-radius: 50%;
+  box-shadow: 0 0 10px rgba(245,166,35,0.8);
+}
+.live-car {
+  position: absolute; top: 55%; left: 35%;
+  transform: translate(-50%, -50%);
+  width: 34px; height: 34px;
+  background: var(--orange); border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px;
+  box-shadow: 0 0 0 8px rgba(245,166,35,0.15), 0 0 0 16px rgba(245,166,35,0.05);
+  animation: livePulse 2.5s ease-in-out infinite;
+}
+@keyframes livePulse {
+  0%,100% { box-shadow: 0 0 0 6px rgba(245,166,35,0.15), 0 0 0 14px rgba(245,166,35,0.05); }
+  50% { box-shadow: 0 0 0 10px rgba(245,166,35,0.2), 0 0 0 22px rgba(245,166,35,0.07); }
+}
+.dest-marker {
+  position: absolute; top: 32%; right: 26%;
+  width: 10px; height: 10px;
+  background: #fff; border-radius: 50%;
+  border: 2px solid var(--orange);
+  box-shadow: 0 0 8px rgba(245,166,35,0.4);
+}
+.live-bottom {
+  background: #0F0F14; padding: 14px 16px 18px;
+  border-top: 1px solid rgba(255,255,255,0.07);
+}
+.live-eta-row {
+  display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
+}
+.live-eta { font-size: 12px; color: var(--g2); }
+.live-eta-val { font-size: 17px; font-weight: 700; color: var(--orange); }
+.live-progress { height: 4px; background: #1A1A22; border-radius: 2px; overflow: hidden; }
+.live-progress-bar { height: 100%; width: 62%; background: linear-gradient(to right, var(--orange), rgba(245,166,35,0.6)); border-radius: 2px; }
+
+/* ── Download section ── */
+.download-section {
+  height: 100vh; min-height: 600px;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center; padding: 0 24px;
+  position: relative; z-index: 1;
+}
+.dl-label {
+  font-size: 10px; letter-spacing: 5px; color: var(--orange);
+  text-transform: uppercase; margin-bottom: 20px; font-family: var(--mono);
+}
+.dl-title {
+  font-size: clamp(44px, 7vw, 90px);
+  font-weight: 900; letter-spacing: -3px;
+  margin-bottom: 16px; line-height: 1;
+}
+.dl-sub { font-size: 18px; color: var(--g1); margin-bottom: 36px; }
+.store-btns { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-bottom: 20px; }
+.store-btn {
+  display: flex; align-items: center; gap: 12px;
+  background: #111; border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 14px; padding: 14px 24px;
+  text-decoration: none; color: var(--white);
+  transition: border-color 0.2s, background 0.2s, transform 0.2s;
+}
+.store-btn:hover { border-color: var(--orange); background: rgba(245,166,35,0.05); transform: translateY(-2px); }
+.store-btn-icon { font-size: 26px; line-height: 1; }
+.store-btn-sub { font-size: 10px; color: var(--g2); letter-spacing: 1px; }
+.store-btn-name { font-size: 16px; font-weight: 700; }
+.waitlist-note { font-size: 13px; color: var(--g2); }
+.waitlist-note a { color: var(--orange); text-decoration: none; }
+
+/* ── Divider section ── */
+.info-strip {
+  position: relative; z-index: 1;
+  border-top: 1px solid rgba(255,255,255,0.05);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  padding: 40px 48px;
+  display: flex; justify-content: center; gap: 80px; flex-wrap: wrap;
+  background: rgba(255,255,255,0.01);
+}
+.info-item { text-align: center; }
+.info-val { font-size: 42px; font-weight: 800; color: var(--orange); letter-spacing: -2px; line-height: 1; margin-bottom: 6px; }
+.info-label { font-size: 12px; color: var(--g2); letter-spacing: 1px; text-transform: uppercase; }
+
+/* ── Footer ── */
+footer {
+  border-top: 1px solid rgba(255,255,255,0.05);
+  padding: 32px 48px;
+  display: flex; justify-content: space-between; align-items: center;
+  flex-wrap: wrap; gap: 16px;
+  position: relative; z-index: 1;
+}
+.footer-logo { font-size: 22px; font-weight: 800; color: var(--orange); }
+.footer-copy { font-size: 12px; color: var(--g2); }
+.footer-links { display: flex; gap: 24px; flex-wrap: wrap; }
+.footer-links a { font-size: 12px; color: var(--g2); text-decoration: none; transition: color 0.2s; }
+.footer-links a:hover { color: var(--white); }
+
+/* ── Mobile ── */
+@media (max-width: 860px) {
+  nav { padding: 16px 24px; }
+  .scroll-wrapper { flex-direction: column; padding: 0 24px; }
+  .sticky-phone-wrapper { width: 100%; order: -1; }
+  .sticky-phone-inner { position: relative; top: auto; padding: 80px 0 0; }
+  .phone { width: 240px; height: 500px; }
+  .section { height: auto; min-height: auto; padding: 60px 0 40px; }
+  .section-content { padding-right: 0; max-width: 100%; }
+  .section-title { font-size: 34px; }
+  .info-strip { gap: 40px; padding: 32px 24px; }
+  footer { padding: 24px; flex-direction: column; text-align: center; }
+  .footer-links { justify-content: center; }
+}
+</style>
+</head>
+<body>
+<div id="ambience"><span class="ab1"></span><span class="ab2"></span><span class="ab3"></span></div>
+
+<!-- Nav -->
+<nav>
+  <div class="nav-logo">واصل</div>
+  <a href="#download" class="nav-cta">Get the App</a>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="hero-label">JORDAN · 2026</div>
+  <div class="hero-title">واصل</div>
+  <div class="hero-sub">Jordan's first subscription rideshare —<br/><strong>drivers keep 100% of every fare.</strong></div>
+  <div class="hero-tags">
+    <span class="tag">Zero Commission</span>
+    <span class="tag">Flat Monthly Fee</span>
+    <span class="tag">Smart Dispatch</span>
+    <span class="tag">Live Tracking</span>
+  </div>
+  <div class="scroll-hint">
+    <div class="scroll-line"></div>
+    SCROLL
+  </div>
+</section>
+
+<!-- Stats strip -->
+<div class="info-strip">
+  <div class="info-item">
+    <div class="info-val">100%</div>
+    <div class="info-label">Fares kept by drivers</div>
+  </div>
+  <div class="info-item">
+    <div class="info-val">0%</div>
+    <div class="info-label">Commission</div>
+  </div>
+  <div class="info-item">
+    <div class="info-val">&lt;4 min</div>
+    <div class="info-label">Avg pickup time</div>
+  </div>
+  <div class="info-item">
+    <div class="info-val">3</div>
+    <div class="info-label">Subscription tiers</div>
+  </div>
+</div>
+
+<!-- Scroll sections with sticky phone -->
+<div class="scroll-wrapper">
+
+  <!-- Sections list (left) -->
+  <div class="sections-list">
+
+    <div class="section" data-screen="0">
+      <div class="section-content">
+        <span class="section-num">01 — FOR RIDERS</span>
+        <h2 class="section-title">Book a ride<br/>in seconds.</h2>
+        <p class="section-desc">Open the app, drop your pin, and a verified driver is on the way. No surge pricing, no surprises — ever.</p>
+        <ul class="feature-list">
+          <li>Real-time driver tracking on a live map</li>
+          <li>Upfront fare — no surge pricing</li>
+          <li>Rated and verified drivers only</li>
+          <li>Pay with cash or card</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section" data-screen="1">
+      <div class="section-content">
+        <span class="section-num">02 — RIDE CONFIRMED</span>
+        <h2 class="section-title">Your driver<br/>is arriving.</h2>
+        <p class="section-desc">See your driver's name, photo, rating, and exact vehicle before they arrive. Track every second on the live map.</p>
+        <div class="stat-row">
+          <div class="stat">
+            <span class="stat-val">&lt;4 min</span>
+            <span class="stat-label">Avg pickup</span>
+          </div>
+          <div class="stat">
+            <span class="stat-val">4.9 ★</span>
+            <span class="stat-label">Avg driver rating</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section" data-screen="2">
+      <div class="section-content">
+        <span class="section-num">03 — FOR DRIVERS</span>
+        <h2 class="section-title">Drive on<br/>your terms.</h2>
+        <p class="section-desc">No commission. No percentage cut. Pay one flat monthly subscription and keep every fils you earn from every trip.</p>
+        <div class="stat-row">
+          <div class="stat">
+            <span class="stat-val">100%</span>
+            <span class="stat-label">Fares kept</span>
+          </div>
+          <div class="stat">
+            <span class="stat-val">0%</span>
+            <span class="stat-label">Commission</span>
+          </div>
+          <div class="stat">
+            <span class="stat-val">+40%</span>
+            <span class="stat-label">More income</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section" data-screen="3">
+      <div class="section-content">
+        <span class="section-num">04 — SUBSCRIPTION PLANS</span>
+        <h2 class="section-title">Pick your<br/>plan.</h2>
+        <p class="section-desc">Three tiers designed to match how much you drive. Start on Silver and upgrade anytime — no lock-in.</p>
+        <div class="tier-pills">
+          <span class="tier-pill-s">Silver</span>
+          <span class="tier-pill-g">Gold</span>
+          <span class="tier-pill-p">Platinum</span>
+        </div>
+        <ul class="feature-list" style="margin-top:18px;">
+          <li>Cancel or switch plans anytime</li>
+          <li>Priority dispatch on higher tiers</li>
+          <li>Larger coverage radius as you upgrade</li>
+          <li>All plans include zero commission</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section" data-screen="4">
+      <div class="section-content">
+        <span class="section-num">05 — LIVE TRACKING</span>
+        <h2 class="section-title">Watch your<br/>ride live.</h2>
+        <p class="section-desc">Both riders and drivers get real-time GPS tracking throughout every trip. Share your journey with family for added peace of mind.</p>
+        <ul class="feature-list">
+          <li>Live GPS for riders and drivers</li>
+          <li>Share your trip with any contact</li>
+          <li>Emergency contact button</li>
+          <li>Automatic trip receipts</li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Sticky phone (right) -->
+  <div class="sticky-phone-wrapper">
+    <div class="sticky-phone-inner">
+      <div class="phone" id="mainPhone">
+        <div class="phone-island"></div>
+        <div class="phone-screen">
+
+          <!-- Screen 0: Rider booking -->
+          <div class="app-screen screen-rider active" id="screen-0">
+            <div class="map-bg">
+              <div class="map-road-h"></div>
+              <div class="map-road-v"></div>
+              <div class="map-road-diag"></div>
+              <div class="map-glow"></div>
+              <div class="map-pin"></div>
+              <div class="car-dots">
+                <div class="car-dot">
+                  <div class="car-dot-ring">🚗</div>
+                </div>
+              </div>
+            </div>
+            <div class="rider-bottom">
+              <div class="where-bar">
+                <div class="where-dot"></div>
+                <span class="where-text">Where to?</span>
+              </div>
+              <div class="ride-btn">Request واصل</div>
+            </div>
+          </div>
+
+          <!-- Screen 1: Ride confirmed -->
+          <div class="app-screen screen-confirmed" id="screen-1">
+            <div class="confirmed-header">
+              <div class="confirmed-icon">🚗</div>
+              <div class="confirmed-title">Driver on the way</div>
+              <div class="confirmed-eta">Arriving in 3 minutes</div>
+            </div>
+            <div class="driver-card">
+              <div class="driver-avatar">AK</div>
+              <div>
+                <div class="driver-name">Ahmad K.</div>
+                <div class="driver-rating">⭐ 4.93 · 847 trips</div>
+                <div class="driver-car">Toyota Camry · White</div>
+              </div>
+            </div>
+            <div class="trip-meta">
+              <div class="trip-meta-item">
+                <div class="trip-meta-val">3 min</div>
+                <div class="trip-meta-label">Pickup</div>
+              </div>
+              <div class="trip-meta-item">
+                <div class="trip-meta-val">12 min</div>
+                <div class="trip-meta-label">Trip</div>
+              </div>
+              <div class="trip-meta-item">
+                <div class="trip-meta-val">4.50 JD</div>
+                <div class="trip-meta-label">Fare</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Screen 2: Driver dashboard -->
+          <div class="app-screen screen-driver" id="screen-2">
+            <div class="online-toggle-row">
+              <div class="online-status">You're Online <span>Accepting rides</span></div>
+              <div class="toggle"></div>
+            </div>
+            <div class="earnings-card">
+              <div class="earnings-label">TODAY'S EARNINGS</div>
+              <div class="earnings-val">28.50 JD</div>
+              <div class="earnings-sub">0% commission — all yours</div>
+            </div>
+            <div class="trips-row">
+              <div class="trip-stat">
+                <div class="trip-stat-val">7</div>
+                <div class="trip-stat-label">Trips</div>
+              </div>
+              <div class="trip-stat">
+                <div class="trip-stat-val">4.95</div>
+                <div class="trip-stat-label">Rating</div>
+              </div>
+              <div class="trip-stat">
+                <div class="trip-stat-val" style="color:var(--orange);">Gold</div>
+                <div class="trip-stat-label">Tier</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Screen 3: Subscriptions -->
+          <div class="app-screen screen-subs" id="screen-3">
+            <div class="subs-header">
+              <div class="subs-title">Choose Your Plan</div>
+              <div class="subs-subtitle">Keep 100% on every tier</div>
+            </div>
+            <div class="sub-card">
+              <div>
+                <div class="sub-name">Silver</div>
+                <div class="sub-price">15 JD / month</div>
+              </div>
+              <span class="sub-badge badge-silver">Starter</span>
+            </div>
+            <div class="sub-card gold-card">
+              <div>
+                <div class="sub-name">Gold</div>
+                <div class="sub-price">25 JD / month</div>
+              </div>
+              <span class="sub-badge badge-gold">Popular</span>
+            </div>
+            <div class="sub-card plat-card">
+              <div>
+                <div class="sub-name">Platinum</div>
+                <div class="sub-price">40 JD / month</div>
+              </div>
+              <span class="sub-badge badge-plat">Pro</span>
+            </div>
+            <div class="sub-note">Cancel anytime · No hidden fees</div>
+          </div>
+
+          <!-- Screen 4: Live tracking -->
+          <div class="app-screen screen-live" id="screen-4">
+            <div class="live-map">
+              <div class="route-path"></div>
+              <div class="live-car">🚗</div>
+              <div class="dest-marker"></div>
+            </div>
+            <div class="live-bottom">
+              <div class="live-eta-row">
+                <span class="live-eta">Arriving at destination</span>
+                <span class="live-eta-val">4 min</span>
+              </div>
+              <div class="live-progress"><div class="live-progress-bar"></div></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Download section -->
+<section class="download-section" id="download">
+  <div class="dl-label">AVAILABLE IN JORDAN</div>
+  <h2 class="dl-title">Ready to<br/><span style="color:var(--orange)">واصل?</span></h2>
+  <p class="dl-sub">Download the app and start riding or driving today.</p>
+  <div class="store-btns">
+    <a href="#" class="store-btn">
+      <div class="store-btn-icon">🍎</div>
+      <div class="store-btn-text">
+        <div class="store-btn-sub">DOWNLOAD ON THE</div>
+        <div class="store-btn-name">App Store</div>
+      </div>
+    </a>
+    <a href="#" class="store-btn">
+      <div class="store-btn-icon">▶</div>
+      <div class="store-btn-text">
+        <div class="store-btn-sub">GET IT ON</div>
+        <div class="store-btn-name">Google Play</div>
+      </div>
+    </a>
+  </div>
+  <p class="waitlist-note">Investors? <a href="/pitchdeck">View our pitch deck →</a></p>
+</section>
+
+<!-- Footer -->
+<footer>
+  <div class="footer-logo">واصل</div>
+  <div class="footer-copy">© 2026 Wasel Technologies · Amman, Jordan</div>
+  <div class="footer-links">
+    <a href="#">Privacy</a>
+    <a href="#">Terms</a>
+    <a href="#">Contact</a>
+    <a href="/pitchdeck">Investors</a>
+  </div>
+</footer>
+
+<script>
+// Scroll-driven phone screen switching
+const sections = document.querySelectorAll('.section[data-screen]');
+const screens  = document.querySelectorAll('.app-screen');
+
+function setScreen(idx) {
+  screens.forEach((s, i) => s.classList.toggle('active', i === idx));
+}
+
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) setScreen(parseInt(e.target.dataset.screen));
+  });
+}, { threshold: 0.5 });
+
+sections.forEach(s => observer.observe(s));
+
+// Hero entrance
+window.addEventListener('DOMContentLoaded', () => {
+  anime({
+    targets: '.hero-label, .hero-title, .hero-sub, .hero-tags, .scroll-hint',
+    opacity: [0, 1],
+    translateY: [28, 0],
+    delay: anime.stagger(110, { start: 200 }),
+    duration: 900,
+    easing: 'easeOutExpo',
+  });
+  anime({
+    targets: '#mainPhone',
+    opacity: [0, 1],
+    translateY: [50, 0],
+    duration: 1100,
+    delay: 500,
+    easing: 'easeOutExpo',
+  });
+  anime({
+    targets: '.info-item',
+    opacity: [0, 1],
+    translateY: [20, 0],
+    delay: anime.stagger(80, { start: 800 }),
+    duration: 700,
+    easing: 'easeOutExpo',
+  });
+});
+</script>
+</body>
+</html>
