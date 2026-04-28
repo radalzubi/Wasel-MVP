@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background: #080808;
+    color: #F5F5F5;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    overflow-x: hidden;
+  }
+
+  /* Remove scrollbar while keeping scroll */
+  ::-webkit-scrollbar { width: 0px; }
+
+  /* Amber selection */
+  ::selection {
+    background: rgba(245, 166, 35, 0.18);
+    color: #fff;
+  }
+
+  /* Respect reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  .section-overline {
+    @apply text-w-amber text-xs font-semibold tracking-[0.18em] uppercase mb-4;
+  }
+
+  .section-heading {
+    @apply text-w-text font-extrabold tracking-tightest leading-none;
+  }
+
+  .btn-primary {
+    @apply bg-w-amber text-black font-semibold text-sm px-6 py-3 rounded-full
+           transition-all duration-300 ease-out
+           hover:bg-w-gold hover:scale-[1.02] active:scale-[0.98];
+  }
+
+  .btn-secondary {
+    @apply text-w-muted text-sm font-medium
+           border border-w-border px-6 py-3 rounded-full
+           transition-all duration-300 ease-out
+           hover:text-w-text hover:border-white/20 active:scale-[0.98];
+  }
+
+  /* Thin divider line */
+  .divider {
+    @apply border-t border-w-border;
+  }
+
+  /* Phone demo — prevent text scraping */
+  .phone-demo-shell {
+    user-select: none;
+    -webkit-user-select: none;
+    pointer-events: auto;
+  }
+
+  .phone-demo-shell * {
+    -webkit-touch-callout: none;
+  }
+}
