@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npx tsc --noEmit
+
+  apps:
+    name: Rider, driver and shared typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit -p packages/shared
+      - run: npx tsc --noEmit -p rider
+      - run: npx tsc --noEmit -p driver
+
+  website:
+    name: Website build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website-v2
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: website-v2/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  docker:
+    name: Backend Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build image
+        run: docker build -t wasel-backend:ci .
+      - name: Smoke-test /health
+        run: |
+          docker run -d --name backend -p 3001:3001 \
+            -e SUPABASE_URL=http://127.0.0.1:54321 \
+            -e SUPABASE_SERVICE_ROLE_KEY=ci-placeholder \
+            -e ALLOWED_ORIGINS=http://localhost \
+            wasel-backend:ci
+          for _ in $(seq 1 30); do
+            if curl -fsS http://localhost:3001/health; then exit 0; fi
+            sleep 1
+          done
+          docker logs backend
+          exit 1

@@ -101,6 +101,13 @@ npm run backend:build  # compile the backend to backend/dist
 
 For a native build, run `npm run ios` or `npm run android` from inside `rider/` or `driver/`.
 
+CI (`.github/workflows/ci.yml`) runs on every push to `main` and every pull request. It typechecks the backend, both apps and `packages/shared`, builds `website-v2`, and builds the backend Docker image and checks `/health`. To run the typechecks locally:
+
+```bash
+npx tsc --noEmit -p packages/shared && npx tsc --noEmit -p rider && npx tsc --noEmit -p driver
+(cd backend && npx tsc --noEmit)
+```
+
 ### Configuration
 
 All secrets stay in untracked `.env` files; only variable names are listed here.
