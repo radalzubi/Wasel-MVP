@@ -126,7 +126,7 @@ The Google Directions and Places keys are optional. Without them, `/api/trips/es
 
 ## Deployment
 
-- **Backend:** the root `Dockerfile` builds only `backend/` on `node:20-alpine` and runs `node dist/index.js`. `railway.toml` points Railway at that Dockerfile with a `/health` check and restart-on-failure; `backend/railway.toml` is a Nixpacks alternative for a service rooted in `backend/`. Set the backend variables above in the Railway dashboard.
+- **Backend:** the root `Dockerfile` builds only `backend/` on `node:20-alpine`. A build stage compiles TypeScript, and the runtime stage installs production dependencies only and runs `node dist/index.js` as the non-root `node` user. `railway.toml` points Railway at that Dockerfile with a `/health` check and restart-on-failure; `backend/railway.toml` is a Nixpacks alternative for a service rooted in `backend/`. Set the backend variables above in the Railway dashboard.
 - **Mobile builds:** each app has an `eas.json` with `development`, `preview`, `testflight` and `production` profiles. `app.config.js` reads `GOOGLE_MAPS_API_KEY` at build time; supply it as an EAS secret.
 - **TestFlight without EAS credits:** `./ship.sh rider` or `./ship.sh driver` builds on a Mac and uploads to TestFlight. Copy `.ship-secrets.example` to `.ship-secrets` (gitignored); it needs `APPLE_TEAM_ID`, `ASC_KEY_ID`, `ASC_ISSUER_ID` and `API_URL`.
 - **Pitch deck:** pushes to `main` publish `pitchdeck/` to GitHub Pages.
