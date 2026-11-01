@@ -1,5 +1,23 @@
 # Wasel
 
+[![CI](https://github.com/radalzubi/Wasel-MVP/actions/workflows/ci.yml/badge.svg)](https://github.com/radalzubi/Wasel-MVP/actions/workflows/ci.yml)
+
+**A rider app, driver app and dispatch backend for subscription-based ride-hailing in Jordan.**
+
+Built by [Rad AlZubi](https://github.com/radalzubi). I implemented both mobile apps, the backend, dispatch logic, data integration and supporting web surfaces.
+
+- **Product:** bilingual Arabic/English ride requests, driver offers, trip tracking and ratings.
+- **Engineering:** weighted driver selection, a trip state machine, server-calculated fares and persisted dispatch retries.
+- **Stage:** mobile MVP. This repository demonstrates implementation; it does not establish a commercially operating fleet.
+- **Verification:** CI checks app/backend types, builds the website and container, and smoke-tests backend health. These checks are narrower than a complete live ride test.
+
+**Inspect the implementation:** [dispatch engine](backend/src/dispatch/engine.ts) · [driver scoring](backend/src/dispatch/scoring.ts) · [rider app](rider/) · [driver app](driver/) · [CI](.github/workflows/ci.yml)
+
+**Related work:** [business simulation](https://github.com/radalzubi/wasel-sim) · [earlier prototype](https://github.com/radalzubi/wasel-prototype)
+
+---
+
+
 Wasel (واصل) is a ride-hailing MVP built for Jordan and the wider MENA region. This monorepo contains two Expo / React Native mobile apps (one for riders, one for drivers), a Node/TypeScript backend that handles authentication, fare estimates and driver dispatch, and the supporting Supabase schema, marketing sites and pitch deck. Both apps are bilingual (English and Arabic, with right-to-left layout) and use Supabase Realtime to keep trips, offers and driver locations live.
 
 The project is an MVP in active development. A `WAITLIST_MODE` flag lets the backend and apps run in waitlist-only mode before launch.
